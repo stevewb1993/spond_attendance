@@ -39,7 +39,7 @@ def _extract_session_info(df: pd.DataFrame) -> dict[str, tuple[str, date]]:
     for col in df.columns:
         dt = _parse_session_column(col)
         if dt is not None:
-            session_name = str(df[col].iloc[0]).strip()
+            session_name = str(df[col].iloc[0]).strip().rstrip("*").strip()
             session_date = dt.date()
             session_info[col] = (session_name, session_date)
     return session_info
