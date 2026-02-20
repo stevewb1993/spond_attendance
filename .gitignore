@@ -3,3 +3,6 @@ __pycache__/
 .venv/
 dist/
 *.egg-info/
+.vscode/
+output_data/.spond_state.json
+output_data/spond.csv
