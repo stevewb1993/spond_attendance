@@ -81,7 +81,7 @@ def _make_wide_df(
             disclaimer_row[col] = np.nan
         rows.append(disclaimer_row)
 
-    df = pd.DataFrame(rows, columns=col_order)
+    df = pd.DataFrame(rows, columns=col_order)  # ty: ignore[invalid-argument-type]
     return df
 
 
@@ -141,8 +141,8 @@ class TestExtractSessionInfo:
         assert len(info) == 2
 
         # Stars stripped from session names
-        assert info[dt_a] == ("Session A", date(2025, 4, 12))
-        assert info[dt_b] == ("Session B", date(2025, 4, 12))
+        assert info[dt_a] == ("Session A", date(2025, 4, 12))  # ty: ignore[invalid-argument-type]
+        assert info[dt_b] == ("Session B", date(2025, 4, 12))  # ty: ignore[invalid-argument-type]
 
     def test_non_datetime_columns_ignored(self):
         dt = datetime(2025, 4, 12, 14, 0)
@@ -176,7 +176,13 @@ class TestTransformFile:
         # 3 members x 2 sessions = 6 rows
         assert result.shape[0] == 6
 
-        expected_cols = ["name", "session_name", "session_date", "session_day_of_week", "attended"]
+        expected_cols = [
+            "name",
+            "session_name",
+            "session_date",
+            "session_day_of_week",
+            "attended",
+        ]
         assert list(result.columns) == expected_cols
 
     def test_attended_is_int_nan_becomes_zero(self):
@@ -406,11 +412,16 @@ class TestGenerateOutputs:
         assert "|" in detail_content
         # Pipe should be the separator; commas should not appear as separators
         detail_lines = detail_content.strip().splitlines()
-        assert detail_lines[0] == "name|session_name|session_date|session_day_of_week|attended"
+        assert (
+            detail_lines[0]
+            == "name|session_name|session_date|session_day_of_week|attended"
+        )
 
         summary_content = summary_path.read_text()
         summary_lines = summary_content.strip().splitlines()
-        assert summary_lines[0] == "session_name|session_date|session_day_of_week|attended"
+        assert (
+            summary_lines[0] == "session_name|session_date|session_day_of_week|attended"
+        )
 
     def test_session_attendance_aggregation(self, tmp_path: Path):
         df = pd.DataFrame(

@@ -12,7 +12,7 @@ import pytest
 from spond_attendance import io, transform
 from spond_attendance.cli import main
 
-DATA_DIR = Path("/home/steve/repos/spond/data/")
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 data_dir_exists = pytest.mark.skipif(
     not DATA_DIR.is_dir(),
@@ -166,10 +166,18 @@ class TestAttendanceFigures:
         ]
         actual = set(session["name"])
         expected = {
-            "Andy Reid", "Ben Williams", "Carole Jenkins",
-            "Elizabeth Cowley", "Emma Sewart", "Graham Oak",
-            "Jamie Duncan", "Louise Stranks", "Niall Urquhart",
-            "Sarah Collin", "Shayne Attwood", "Simon Rayner",
+            "Andy Reid",
+            "Ben Williams",
+            "Carole Jenkins",
+            "Elizabeth Cowley",
+            "Emma Sewart",
+            "Graham Oak",
+            "Jamie Duncan",
+            "Louise Stranks",
+            "Niall Urquhart",
+            "Sarah Collin",
+            "Shayne Attwood",
+            "Simon Rayner",
             "Susan Sidey",
         }
         assert actual == expected
@@ -228,9 +236,7 @@ class TestFullPipeline:
         ]
         assert len(df) > 0
 
-    def test_session_attendance_csv_structure(
-        self, two_files: Path, tmp_path: Path
-    ):
+    def test_session_attendance_csv_structure(self, two_files: Path, tmp_path: Path):
         output_dir = tmp_path / "output"
         main([str(two_files), "-o", str(output_dir), "--no-llm"])
         df = pd.read_csv(output_dir / "session_attendance.csv", sep="|")

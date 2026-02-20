@@ -36,7 +36,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Directory containing spond_attendance_*.xlsx files",
     )
     parser.add_argument(
-        "-o", "--output-dir",
+        "-o",
+        "--output-dir",
         type=Path,
         default=None,
         help="Output directory for CSV files (default: output_data/ in current directory)",
@@ -66,7 +67,10 @@ def main(argv: list[str] | None = None) -> None:
 
     all_files = discover_files(input_dir)
     if not all_files:
-        print(f"Error: No spond_attendance_*.xlsx files found in {input_dir}", file=sys.stderr)
+        print(
+            f"Error: No spond_attendance_*.xlsx files found in {input_dir}",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     if args.full_refresh:
@@ -120,16 +124,23 @@ def main(argv: list[str] | None = None) -> None:
                     mappings[name] = SKIP_SENTINEL
                 save_name_mappings(mappings_path, mappings)
                 saved = len(approved) + len(skipped)
-                print(f"\n{saved} mapping(s) saved to {mappings_path}" + (f" ({len(skipped)} skipped)" if skipped else ""))
+                print(
+                    f"\n{saved} mapping(s) saved to {mappings_path}"
+                    + (f" ({len(skipped)} skipped)" if skipped else "")
+                )
         else:
-            print("\n(Skipping LLM suggestions — use without --no-llm to get suggestions)")
+            print(
+                "\n(Skipping LLM suggestions — use without --no-llm to get suggestions)"
+            )
 
     result = apply_name_mappings(result, mappings)
 
     # Categorize session names missing from session_types.csv
     # Exclude names that were explicitly skipped in the mapping step
     skipped_names = {k for k, v in mappings.items() if v == SKIP_SENTINEL}
-    uncategorized = set(result["session_name"].unique()) - canonical_names - skipped_names
+    uncategorized = (
+        set(result["session_name"].unique()) - canonical_names - skipped_names
+    )
     if uncategorized:
         print(f"\n{len(uncategorized)} session name(s) missing from {types_path.name}:")
         for name in sorted(uncategorized):
@@ -144,17 +155,23 @@ def main(argv: list[str] | None = None) -> None:
             if approved_cats:
                 existing_types.update(approved_cats)
                 save_session_types(types_path, existing_types)
-                print(f"\n{len(approved_cats)} category assignment(s) saved to {types_path}")
+                print(
+                    f"\n{len(approved_cats)} category assignment(s) saved to {types_path}"
+                )
         else:
             print("(Add these to session_types.csv to assign categories)")
 
     detail_path, summary_path = generate_outputs(result, output_dir)
 
     # Update state with all files that are now accounted for
-    all_processed = {f.name for f in all_files} if args.full_refresh else load_state(output_dir) | {f.name for f in files_to_process}
+    all_processed = (
+        {f.name for f in all_files}
+        if args.full_refresh
+        else load_state(output_dir) | {f.name for f in files_to_process}
+    )
     save_state(output_dir, all_processed)
 
     sessions = result.groupby(["session_name", "session_date"]).ngroups
-    print(f"\nOutput written:")
+    print("\nOutput written:")
     print(f"  {detail_path}  ({len(result)} rows)")
     print(f"  {summary_path}  ({sessions} sessions)")

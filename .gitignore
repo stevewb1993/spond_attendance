@@ -4,5 +4,11 @@ __pycache__/
 dist/
 *.egg-info/
 .vscode/
+.pytest_cache/
+.mypy_cache/
+.DS_Store
+*~
+*.swp
+*.swo
 output_data/.spond_state.json
 output_data/spond.csv

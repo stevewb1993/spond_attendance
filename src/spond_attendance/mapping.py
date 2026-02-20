@@ -5,7 +5,6 @@ from __future__ import annotations
 import csv
 import json
 import re
-import sys
 from pathlib import Path
 
 import pandas as pd
@@ -32,7 +31,9 @@ def save_name_mappings(path: Path, mappings: dict[str, str]) -> None:
     """Write mappings dict back to session_name_mappings.csv."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=["raw_session_name", "parsed_session_name"])
+        writer = csv.DictWriter(
+            f, fieldnames=["raw_session_name", "parsed_session_name"]
+        )
         writer.writeheader()
         for raw, parsed in sorted(mappings.items()):
             writer.writerow({"raw_session_name": raw, "parsed_session_name": parsed})

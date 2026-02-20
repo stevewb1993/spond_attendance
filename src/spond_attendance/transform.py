@@ -78,12 +78,8 @@ def transform_file(df: pd.DataFrame) -> pd.DataFrame:
     )
 
     # Map session column back to session name and date
-    melted["session_name"] = melted["_session_col"].map(
-        lambda c: session_info[c][0]
-    )
-    melted["session_date"] = melted["_session_col"].map(
-        lambda c: session_info[c][1]
-    )
+    melted["session_name"] = melted["_session_col"].map(lambda c: session_info[c][0])
+    melted["session_date"] = melted["_session_col"].map(lambda c: session_info[c][1])
     melted["session_day_of_week"] = melted["session_date"].apply(
         lambda d: d.strftime("%A")
     )
@@ -92,9 +88,13 @@ def transform_file(df: pd.DataFrame) -> pd.DataFrame:
     melted = melted.rename(columns={"Name": "name"})
 
     # Convert attended: 1 -> 1, NaN/anything else -> 0
-    melted["attended"] = pd.to_numeric(melted["attended"], errors="coerce").fillna(0).astype(int)
+    melted["attended"] = (
+        pd.to_numeric(melted["attended"], errors="coerce").fillna(0).astype(int)
+    )
 
-    return melted[["name", "session_name", "session_date", "session_day_of_week", "attended"]]
+    return melted[
+        ["name", "session_name", "session_date", "session_day_of_week", "attended"]
+    ]
 
 
 def process_files(files: list[Path]) -> pd.DataFrame:
@@ -144,9 +144,9 @@ def _deduplicate(df: pd.DataFrame) -> pd.DataFrame:
     # Filter out future sessions
     df = df[df["session_date"] < today]
 
-    return df.sort_values(
-        ["session_date", "session_name", "name"]
-    ).reset_index(drop=True)
+    return df.sort_values(["session_date", "session_name", "name"]).reset_index(
+        drop=True
+    )
 
 
 def generate_outputs(df: pd.DataFrame, output_dir: Path) -> tuple[Path, Path]:

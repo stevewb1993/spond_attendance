@@ -14,7 +14,7 @@ dependencies = [
 spond-attendance = "spond_attendance.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "ruff>=0.9", "ty>=0.0.17"]
 
 [build-system]
 requires = ["hatchling"]
