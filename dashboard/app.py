@@ -72,8 +72,8 @@ col4.metric(
 )
 
 # ── Tab layout ────────────────────────────────────────────────────────────────
-tab_monthly, tab_yoy, tab_detail, tab_data = st.tabs(
-    ["Monthly Trends", "Year over Year", "Session Detail", "Raw Data"]
+tab_monthly, tab_yoy, tab_yoy_summary, tab_detail, tab_data = st.tabs(
+    ["Monthly Trends", "Year over Year", "YoY Summary", "Session Detail", "Raw Data"]
 )
 
 # ── Monthly Trends ────────────────────────────────────────────────────────────
@@ -185,6 +185,246 @@ with tab_yoy:
             )
             fig.update_layout(height=400, yaxis_rangemode="tozero")
             st.plotly_chart(fig, use_container_width=True)
+
+# ── YoY Summary (pivot table) ────────────────────────────────────────────────
+with tab_yoy_summary:
+    st.subheader("Year-over-Year Summary")
+
+    # Work from unfiltered data so sidebar filters don't affect this tab
+    yoy_src = df.copy()
+
+    # Session selectors per category with sensible defaults
+    cat_defaults: dict[str, list[str]] = {
+        "Swim": ["STV Swim", "STV swim - technique"],
+        "Bike": ["Indoor Bike"],
+        "Run": ["Club Run Session - Green Members"],
+        "S&C": ["S&C"],
+    }
+
+    selected_sessions: list[str] = []
+    for cat, defaults in cat_defaults.items():
+        cat_sessions = sorted(
+            yoy_src.loc[yoy_src["category"] == cat, "session_name"].unique()
+        )
+        if not cat_sessions:
+            continue
+        valid_defaults = [s for s in defaults if s in cat_sessions]
+        chosen = st.multiselect(
+            f"{cat} sessions",
+            cat_sessions,
+            default=valid_defaults,
+            key=f"yoy_summary_{cat}",
+        )
+        selected_sessions.extend(chosen)
+
+    if not selected_sessions:
+        st.info("Select at least one session above.")
+        st.stop()
+
+    # Rolling window: last N months back from the latest data point
+    num_months = st.slider("Months to show", 3, 12, 6, key="yoy_summary_months")
+
+    # Find the latest month boundary in the data for selected sessions
+    sel_data = yoy_src[yoy_src["session_name"].isin(selected_sessions)]
+    latest_date = sel_data["session_date"].max()
+    # Build list of (year, month) pairs going back num_months from latest
+    ym_pairs: list[tuple[int, int]] = []
+    y, m = latest_date.year, latest_date.month
+    for _ in range(num_months):
+        ym_pairs.append((y, m))
+        m -= 1
+        if m == 0:
+            m = 12
+            y -= 1
+    ym_pairs.reverse()
+
+    # Also need same months one year earlier for comparison
+    compare_pairs = [(y - 1, m) for y, m in ym_pairs]
+    all_pairs = set(ym_pairs) | set(compare_pairs)
+
+    # Filter to selected sessions and relevant (year, month) combos
+    src = sel_data.copy()
+    src["ym"] = list(zip(src["year"], src["month"]))
+    src = src[src["ym"].isin(all_pairs)].drop(columns="ym")
+
+    # Compute monthly averages per session / day-of-week / year / month
+    summary = (
+        src.groupby(["year", "month", "session_name", "session_day_of_week"])["attended"]
+        .mean()
+        .reset_index()
+        .rename(columns={"attended": "avg"})
+    )
+    summary["avg"] = summary["avg"].round(1)
+    summary["label"] = (
+        summary["session_name"] + " (" + summary["session_day_of_week"].str[:3] + ")"
+    )
+
+    if summary.empty:
+        st.info("No data for the selected sessions and time range.")
+        st.stop()
+
+    # Map each label back to its category for ordering
+    label_cat = (
+        summary.drop_duplicates("label")
+        .set_index("label")["session_name"]
+        .map(
+            yoy_src.drop_duplicates("session_name")
+            .set_index("session_name")["category"]
+        )
+    )
+
+    # Only keep session/day combos that exist in the current period
+    # (excludes defunct sessions like Tuesday S&C that no longer run)
+    active_labels = set(
+        summary[summary[["year", "month"]].apply(tuple, axis=1).isin(ym_pairs)]["label"]
+    )
+    if not active_labels:
+        st.info("No sessions found with data in the current period.")
+        st.stop()
+    summary = summary[summary["label"].isin(active_labels)]
+
+    # Column headers: "Mon YYYY" for each month in the window
+    col_headers = [f"{month_labels[m][:3]} {y}" for y, m in ym_pairs]
+
+    # Pivot helper
+    def _get_val(label: str, y: int, m: int) -> float | None:
+        row = summary[
+            (summary["label"] == label)
+            & (summary["year"] == y)
+            & (summary["month"] == m)
+        ]
+        if row.empty:
+            return None
+        return row["avg"].iloc[0]
+
+    # Order labels: Swim → Bike → Run → S&C, then by day of week within each
+    cat_order = {"Swim": 0, "Bike": 1, "Run": 2, "S&C": 3}
+    day_order = {"Mon": 0, "Tue": 1, "Wed": 2, "Thu": 3, "Fri": 4, "Sat": 5, "Sun": 6}
+
+    def _sort_key(lbl: str) -> tuple[int, str, int]:
+        cat_idx = cat_order.get(label_cat.get(lbl, "Other"), 9)
+        # Extract the 3-letter day abbreviation from "Session Name (Day)"
+        day_abbr = lbl.rsplit("(", 1)[-1].rstrip(")")
+        day_idx = day_order.get(day_abbr, 9)
+        # Group by session name (everything before the day), then by day
+        session_name = lbl.rsplit("(", 1)[0].strip()
+        return (cat_idx, session_name, day_idx)
+
+    ordered_labels = sorted(active_labels, key=_sort_key)
+
+    # Build rows with category header rows inserted
+    row_labels: list[str] = []
+    row_data: dict[str, list[str]] = {col: [] for col in col_headers}
+    prev_cat: str | None = None
+    for label in ordered_labels:
+        cat = label_cat.get(label, "Other")
+        if cat != prev_cat:
+            # Insert a category header row (bold via markdown-ish caps)
+            header = f"── {cat} ──"
+            row_labels.append(header)
+            for col in col_headers:
+                row_data[col].append("")
+            prev_cat = cat
+        row_labels.append(label)
+        for (cy, cm), (py, pm), col in zip(ym_pairs, compare_pairs, col_headers):
+            c = _get_val(label, cy, cm)
+            p = _get_val(label, py, pm)
+            if c is not None and p is not None:
+                diff = c - p
+                sign = "+" if diff > 0 else ""
+                row_data[col].append(f"{c:.1f}  ({sign}{diff:.1f})")
+            elif c is not None:
+                row_data[col].append(f"{c:.1f}")
+            else:
+                row_data[col].append("—")
+
+    display_df = pd.DataFrame({"Session": row_labels, **row_data}).set_index("Session")
+
+    st.caption(
+        f"Average attendance for the last {num_months} months. "
+        f"Parentheses show change vs same month one year earlier."
+    )
+    st.dataframe(display_df, use_container_width=True, height=min(600, 50 + 35 * len(row_labels)))
+
+    # Build an HTML table for pasting into emails
+    def _build_html_table() -> str:
+        green = "#2e7d32"
+        red = "#c62828"
+        grey = "#9e9e9e"
+        html = (
+            '<table style="border-collapse:collapse;font-family:Arial,sans-serif;'
+            'font-size:13px">'
+        )
+        # Header row
+        html += "<tr>"
+        html += '<th style="text-align:left;padding:4px 10px;border-bottom:2px solid #333">Session</th>'
+        for col in col_headers:
+            html += (
+                f'<th style="text-align:center;padding:4px 10px;'
+                f'border-bottom:2px solid #333">{col}</th>'
+            )
+        html += "</tr>"
+        # Data rows
+        for i, label in enumerate(row_labels):
+            is_header = label.startswith("──")
+            if is_header:
+                html += "<tr>"
+                html += (
+                    f'<td colspan="{len(col_headers) + 1}" style="padding:8px 4px 2px;'
+                    f'font-weight:bold;font-size:14px;border-bottom:1px solid #ccc">'
+                    f"{label}</td>"
+                )
+                html += "</tr>"
+                continue
+            html += "<tr>"
+            html += f'<td style="padding:3px 10px">{label}</td>'
+            for col in col_headers:
+                val = row_data[col][i]
+                # Colour the delta part
+                cell_style = "text-align:center;padding:3px 10px"
+                if "(" in val:
+                    main, delta = val.split("(", 1)
+                    delta = delta.rstrip(")")
+                    if delta.strip().startswith("+"):
+                        colour = green
+                    elif delta.strip().startswith("-"):
+                        colour = red
+                    else:
+                        colour = grey
+                    cell_html = (
+                        f'{main.strip()} '
+                        f'<span style="color:{colour};font-size:11px">'
+                        f"({delta})</span>"
+                    )
+                else:
+                    cell_html = val
+                html += f'<td style="{cell_style}">{cell_html}</td>'
+            html += "</tr>"
+        html += "</table>"
+        return html
+
+    html_table = _build_html_table()
+
+    # Use a JS-powered copy button via streamlit components
+    copy_js = (
+        "<textarea id='yoy_html' style='position:absolute;left:-9999px'>"
+        + html_table.replace("'", "&#39;")
+        + "</textarea>"
+        "<button onclick=\""
+        "var ta=document.getElementById('yoy_html');"
+        "var blob=new Blob([ta.value],{type:'text/html'});"
+        "var item=new ClipboardItem({'text/html':blob});"
+        "navigator.clipboard.write([item]).then("
+        "function(){this.innerText='Copied!';var b=this;setTimeout(function(){b.innerText='Copy table for email'},1500)}.bind(this)"
+        ");"
+        '" style="padding:6px 16px;border-radius:4px;border:1px solid #ccc;'
+        'cursor:pointer;margin-top:8px;background:#f0f0f0">'
+        "Copy table for email</button>"
+    )
+    st.components.v1.html(copy_js, height=50)
+
+    with st.expander("Preview email table"):
+        st.components.v1.html(html_table, height=40 + 30 * len(row_labels), scrolling=True)
 
 # ── Session Detail ────────────────────────────────────────────────────────────
 with tab_detail:
