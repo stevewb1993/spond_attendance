@@ -249,7 +249,9 @@ with tab_yoy_summary:
 
     # Compute monthly averages per session / day-of-week / year / month
     summary = (
-        src.groupby(["year", "month", "session_name", "session_day_of_week"])["attended"]
+        src.groupby(["year", "month", "session_name", "session_day_of_week"])[
+            "attended"
+        ]
         .mean()
         .reset_index()
         .rename(columns={"attended": "avg"})
@@ -268,8 +270,9 @@ with tab_yoy_summary:
         summary.drop_duplicates("label")
         .set_index("label")["session_name"]
         .map(
-            yoy_src.drop_duplicates("session_name")
-            .set_index("session_name")["category"]
+            yoy_src.drop_duplicates("session_name").set_index("session_name")[
+                "category"
+            ]
         )
     )
 
@@ -344,7 +347,9 @@ with tab_yoy_summary:
         f"Average attendance for the last {num_months} months. "
         f"Parentheses show change vs same month one year earlier."
     )
-    st.dataframe(display_df, use_container_width=True, height=min(600, 50 + 35 * len(row_labels)))
+    st.dataframe(
+        display_df, use_container_width=True, height=min(600, 50 + 35 * len(row_labels))
+    )
 
     # Build an HTML table for pasting into emails
     def _build_html_table() -> str:
@@ -392,7 +397,7 @@ with tab_yoy_summary:
                     else:
                         colour = grey
                     cell_html = (
-                        f'{main.strip()} '
+                        f"{main.strip()} "
                         f'<span style="color:{colour};font-size:11px">'
                         f"({delta})</span>"
                     )
@@ -410,7 +415,7 @@ with tab_yoy_summary:
         "<textarea id='yoy_html' style='position:absolute;left:-9999px'>"
         + html_table.replace("'", "&#39;")
         + "</textarea>"
-        "<button onclick=\""
+        '<button onclick="'
         "var ta=document.getElementById('yoy_html');"
         "var blob=new Blob([ta.value],{type:'text/html'});"
         "var item=new ClipboardItem({'text/html':blob});"
@@ -424,7 +429,9 @@ with tab_yoy_summary:
     st.components.v1.html(copy_js, height=50)
 
     with st.expander("Preview email table"):
-        st.components.v1.html(html_table, height=40 + 30 * len(row_labels), scrolling=True)
+        st.components.v1.html(
+            html_table, height=40 + 30 * len(row_labels), scrolling=True
+        )
 
 # ── Session Detail ────────────────────────────────────────────────────────────
 with tab_detail:
