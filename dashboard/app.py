@@ -410,18 +410,24 @@ with tab_yoy_summary:
 
     html_table = _build_html_table()
 
-    # Use a JS-powered copy button via streamlit components
+    # Use a JS-powered copy button via streamlit components.
+    # We render the HTML in a hidden div and use execCommand('copy') on the
+    # selected contents — this copies as rich text (ideal for email) and works
+    # inside Streamlit's sandboxed iframe where the Clipboard API is blocked.
+    escaped_html = html_table.replace("\\", "\\\\").replace("`", "\\`")
     copy_js = (
-        "<textarea id='yoy_html' style='position:absolute;left:-9999px'>"
-        + html_table.replace("'", "&#39;")
-        + "</textarea>"
+        f"<div id='yoy_render' style='position:fixed;left:-9999px'>{html_table}</div>"
         '<button onclick="'
-        "var ta=document.getElementById('yoy_html');"
-        "var blob=new Blob([ta.value],{type:'text/html'});"
-        "var item=new ClipboardItem({'text/html':blob});"
-        "navigator.clipboard.write([item]).then("
-        "function(){this.innerText='Copied!';var b=this;setTimeout(function(){b.innerText='Copy table for email'},1500)}.bind(this)"
-        ");"
+        "var div=document.getElementById('yoy_render');"
+        "var range=document.createRange();"
+        "range.selectNodeContents(div);"
+        "var sel=window.getSelection();"
+        "sel.removeAllRanges();"
+        "sel.addRange(range);"
+        "document.execCommand('copy');"
+        "sel.removeAllRanges();"
+        "this.innerText='Copied!';"
+        "var b=this;setTimeout(function(){b.innerText='Copy table for email'},1500);"
         '" style="padding:6px 16px;border-radius:4px;border:1px solid #ccc;'
         'cursor:pointer;margin-top:8px;background:#f0f0f0">'
         "Copy table for email</button>"
