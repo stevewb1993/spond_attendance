@@ -28,7 +28,7 @@ data_dir_exists = pytest.mark.skipif(
 @pytest.fixture()
 def single_file(tmp_path: Path) -> Path:
     """Copy a single xlsx file to a temp directory and return the file path."""
-    src = DATA_DIR / "spond_attendance_apr_25.xlsx"
+    src = DATA_DIR / "spond_attendance_2025-04.xlsx"
     dst = tmp_path / src.name
     shutil.copy(src, dst)
     return dst
@@ -38,8 +38,8 @@ def single_file(tmp_path: Path) -> Path:
 def two_files(tmp_path: Path) -> Path:
     """Copy two chronologically adjacent xlsx files to a temp directory."""
     names = [
-        "spond_attendance_mar_24.xlsx",
-        "spond_attendance_apr_24.xlsx",
+        "spond_attendance_2024-03.xlsx",
+        "spond_attendance_2024-04.xlsx",
     ]
     for name in names:
         shutil.copy(DATA_DIR / name, tmp_path / name)
@@ -50,9 +50,9 @@ def two_files(tmp_path: Path) -> Path:
 def three_files(tmp_path: Path) -> Path:
     """Copy three xlsx files to a temp directory."""
     names = [
-        "spond_attendance_mar_24.xlsx",
-        "spond_attendance_apr_24.xlsx",
-        "spond_attendance_may_25.xlsx",
+        "spond_attendance_2024-03.xlsx",
+        "spond_attendance_2024-04.xlsx",
+        "spond_attendance_2025-05.xlsx",
     ]
     for name in names:
         shutil.copy(DATA_DIR / name, tmp_path / name)
@@ -120,7 +120,7 @@ class TestSingleFileProcessing:
 
 
 # ---------------------------------------------------------------------------
-# test_attendance_figures (spond_attendance_apr_25.xlsx)
+# test_attendance_figures (spond_attendance_2025-04.xlsx)
 # ---------------------------------------------------------------------------
 
 
@@ -284,8 +284,8 @@ class TestIncrementalProcessing:
 
         # Copy a third file into the input directory.
         shutil.copy(
-            DATA_DIR / "spond_attendance_may_25.xlsx",
-            two_files / "spond_attendance_may_25.xlsx",
+            DATA_DIR / "spond_attendance_2025-05.xlsx",
+            two_files / "spond_attendance_2025-05.xlsx",
         )
 
         # Third run: should process only the new file.
@@ -306,8 +306,8 @@ class TestDedupOlderWins:
     def test_dedup_reduces_row_count(self, tmp_path: Path):
         # Pick two files likely to have overlapping sessions.
         files_to_use = [
-            "spond_attendance_mar_24.xlsx",
-            "spond_attendance_apr_24.xlsx",
+            "spond_attendance_2024-03.xlsx",
+            "spond_attendance_2024-04.xlsx",
         ]
         paths = []
         for name in files_to_use:

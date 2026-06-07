@@ -10,24 +10,8 @@ from pathlib import Path
 
 import pandas as pd
 
-MONTH_MAP = {
-    "jan": 1,
-    "feb": 2,
-    "mar": 3,
-    "apr": 4,
-    "may": 5,
-    "jun": 6,
-    "jul": 7,
-    "aug": 8,
-    "sep": 9,
-    "sept": 9,
-    "oct": 10,
-    "nov": 11,
-    "dec": 12,
-}
-
 FILENAME_PATTERN = re.compile(
-    r"spond_attendance_([a-z]+)_(\d{2})\.xlsx$", re.IGNORECASE
+    r"spond_attendance_(\d{4})-(\d{2})\.xlsx$", re.IGNORECASE
 )
 
 STATE_FILENAME = ".spond_state.json"
@@ -41,19 +25,18 @@ def parse_file_date(path: Path) -> date:
     match = FILENAME_PATTERN.search(path.name)
     if not match:
         raise ValueError(f"Filename does not match expected pattern: {path.name}")
-    month_str, year_str = match.groups()
-    month = MONTH_MAP.get(month_str.lower())
-    if month is None:
-        raise ValueError(f"Unrecognized month abbreviation: {month_str!r}")
-    year = 2000 + int(year_str)
-    return date(year, month, 1)
+    year_str, month_str = match.groups()
+    month = int(month_str)
+    if not 1 <= month <= 12:
+        raise ValueError(f"Invalid month in filename: {path.name}")
+    return date(int(year_str), month, 1)
 
 
 def discover_files(directory: Path) -> list[Path]:
     """Find all attendance Excel files in directory, sorted oldest-first.
 
     Raises ValueError if any .xlsx file doesn't match the expected
-    naming pattern spond_attendance_{month}_{yy}.xlsx.
+    naming pattern spond_attendance_{YYYY}-{MM}.xlsx.
     """
     unexpected = []
     files = []
@@ -68,7 +51,7 @@ def discover_files(directory: Path) -> list[Path]:
     if unexpected:
         raise ValueError(
             f"Unexpected xlsx file(s) in directory: {', '.join(sorted(unexpected))}. "
-            f"Expected format: spond_attendance_{{month}}_{{yy}}.xlsx"
+            f"Expected format: spond_attendance_{{YYYY}}-{{MM}}.xlsx"
         )
     files.sort(key=parse_file_date)
     return files
