@@ -190,8 +190,12 @@ with tab_yoy:
 with tab_yoy_summary:
     st.subheader("Year-over-Year Summary")
 
-    # Work from unfiltered data so sidebar filters don't affect this tab
-    yoy_src = df.copy()
+    # Respect the sidebar filters (category + date range) for which sessions and
+    # months are displayed. The year-over-year comparison values are pulled from
+    # the full dataset (yoy_full) so the deltas still work even when the date
+    # range excludes the prior year.
+    yoy_src = filtered.copy()
+    yoy_full = df.copy()
 
     # Session selectors per category with sensible defaults
     cat_defaults: dict[str, list[str]] = {
@@ -224,8 +228,11 @@ with tab_yoy_summary:
     # Rolling window: last N months back from the latest data point
     num_months = st.slider("Months to show", 3, 12, 6, key="yoy_summary_months")
 
-    # Find the latest month boundary in the data for selected sessions
+    # Find the latest month boundary in the (filtered) data for selected sessions
     sel_data = yoy_src[yoy_src["session_name"].isin(selected_sessions)]
+    if sel_data.empty:
+        st.info("No data for the selected sessions in the chosen date range.")
+        st.stop()
     latest_date = sel_data["session_date"].max()
     # Build list of (year, month) pairs going back num_months from latest
     ym_pairs: list[tuple[int, int]] = []
@@ -240,12 +247,19 @@ with tab_yoy_summary:
 
     # Also need same months one year earlier for comparison
     compare_pairs = [(y - 1, m) for y, m in ym_pairs]
-    all_pairs = set(ym_pairs) | set(compare_pairs)
 
-    # Filter to selected sessions and relevant (year, month) combos
-    src = sel_data.copy()
-    src["ym"] = list(zip(src["year"], src["month"]))
-    src = src[src["ym"].isin(all_pairs)].drop(columns="ym")
+    # Current-period rows come from the filtered data (so they honour the sidebar
+    # date range); prior-year comparison rows come from the full data (so the
+    # deltas survive even when the range excludes the previous year).
+    cur = sel_data.copy()
+    cur["ym"] = list(zip(cur["year"], cur["month"]))
+    cur = cur[cur["ym"].isin(set(ym_pairs))].drop(columns="ym")
+
+    prior = yoy_full[yoy_full["session_name"].isin(selected_sessions)].copy()
+    prior["ym"] = list(zip(prior["year"], prior["month"]))
+    prior = prior[prior["ym"].isin(set(compare_pairs))].drop(columns="ym")
+
+    src = pd.concat([cur, prior], ignore_index=True)
 
     # Compute monthly averages per session / day-of-week / year / month
     summary = (
@@ -270,7 +284,7 @@ with tab_yoy_summary:
         summary.drop_duplicates("label")
         .set_index("label")["session_name"]
         .map(
-            yoy_src.drop_duplicates("session_name").set_index("session_name")[
+            yoy_full.drop_duplicates("session_name").set_index("session_name")[
                 "category"
             ]
         )
