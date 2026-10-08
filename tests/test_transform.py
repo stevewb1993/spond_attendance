@@ -259,7 +259,8 @@ class TestMergeWithExisting:
             "attended": attended,
         }
 
-    def test_existing_wins_over_new_for_same_key(self):
+    def test_new_wins_over_existing_for_same_key(self):
+        """A corrected register in the new export replaces what was written."""
         existing = pd.DataFrame(
             [self._make_long_row("Alice", "Training", date(2024, 1, 10), 1)]
         )
@@ -269,7 +270,7 @@ class TestMergeWithExisting:
         result = merge_with_existing(existing, new)
 
         assert len(result) == 1
-        assert result.iloc[0]["attended"] == 1  # existing value wins
+        assert result.iloc[0]["attended"] == 0
 
     def test_new_data_fills_in_missing_rows(self):
         existing = pd.DataFrame(
@@ -277,18 +278,15 @@ class TestMergeWithExisting:
         )
         new = pd.DataFrame(
             [
-                self._make_long_row("Alice", "Training", date(2024, 1, 10), 0),
+                self._make_long_row("Alice", "Training", date(2024, 1, 10), 1),
                 self._make_long_row("Bob", "Training", date(2024, 1, 10), 1),
             ]
         )
         result = merge_with_existing(existing, new)
 
         assert len(result) == 2
-        names = set(result["name"])
-        assert names == {"Alice", "Bob"}
-        # Alice keeps her existing value
-        alice_row = result[result["name"] == "Alice"].iloc[0]
-        assert alice_row["attended"] == 1
+        assert set(result["name"]) == {"Alice", "Bob"}
+        assert result["attended"].sum() == 2
 
     def test_future_sessions_filtered_out(self):
         existing = pd.DataFrame(
@@ -309,7 +307,8 @@ class TestMergeWithExisting:
 
 
 class TestDeduplicate:
-    def test_keeps_lowest_source_rank(self):
+    def test_keeps_highest_source_rank(self):
+        """The newest export wins, even when it withdraws an attendance."""
         df = pd.DataFrame(
             [
                 {
@@ -334,7 +333,33 @@ class TestDeduplicate:
         )
         result = deduplicate(df)
         assert len(result) == 1
-        assert result.iloc[0]["attended"] == 1
+        assert result.iloc[0]["attended"] == 0
+
+    def test_registers_are_not_unioned_across_sources(self):
+        """Exports can disagree about who attended, not just how many.
+
+        Keeping both halves of a swapped register would report two
+        attendances for a session each export says had one.
+        """
+        base = {
+            "session_name": "Indoor Bike",
+            "session_date": date(2024, 1, 10),
+            "session_time": "19:00",
+            "session_day_of_week": "Wednesday",
+        }
+        df = pd.DataFrame(
+            [
+                {**base, "name": "Alice", "attended": 1, "_source_rank": 0},
+                {**base, "name": "Bob", "attended": 0, "_source_rank": 0},
+                {**base, "name": "Alice", "attended": 0, "_source_rank": 1},
+                {**base, "name": "Bob", "attended": 1, "_source_rank": 1},
+            ]
+        )
+        result = deduplicate(df)
+
+        assert len(result) == 2
+        assert result["attended"].sum() == 1
+        assert result.set_index("name").loc["Bob", "attended"] == 1
 
     def test_result_sorted_by_date_session_name(self):
         df = pd.DataFrame(

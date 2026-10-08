@@ -149,7 +149,8 @@ def merge_with_existing(existing: pd.DataFrame, new: pd.DataFrame) -> pd.DataFra
 
     Existing rows are kept whether or not the new export still reports
     them, because members who leave the club disappear from newer Spond
-    exports. See deduplicate for how conflicting values are resolved.
+    exports. Where both report a member and session, the new export wins;
+    see deduplicate.
     """
     existing["_source_rank"] = 0
     new["_source_rank"] = 1
@@ -158,14 +159,19 @@ def merge_with_existing(existing: pd.DataFrame, new: pd.DataFrame) -> pd.DataFra
 
 
 def deduplicate(df: pd.DataFrame) -> pd.DataFrame:
-    """Collapse each member/session key to one row, keeping the highest
-    attended value and, where those tie, the oldest source.
+    """Collapse each member/session key to one row, keeping the newest
+    source and, within one source, the highest attended value.
 
-    Taking the highest value picks up registers completed after an export
-    was taken, and copes with Spond holding one session twice with a copy
-    left empty. It never drops a member: a key that only an older export
-    knows about has nothing to compete with, so members who have since
-    left the club keep their history.
+    The newest export that lists a member for a session is authoritative
+    for them: it reflects any register completed or corrected since the
+    previous export. Members it no longer lists keep the last value an
+    export did give them, so members who have left the club keep their
+    history.
+
+    Taking the highest value within one source handles Spond holding a
+    session twice with one copy left empty. Taking it across sources
+    would not: where exports disagree about who attended, the union of
+    both registers reports more people than either export ever did.
     """
     required = ("_source_rank", "attended", *MEMBER_SESSION_KEY_COLUMNS)
     missing = [c for c in required if c not in df.columns]
@@ -174,7 +180,7 @@ def deduplicate(df: pd.DataFrame) -> pd.DataFrame:
 
     today = date.today()
 
-    df = df.sort_values(["attended", "_source_rank"], ascending=[False, True])
+    df = df.sort_values(["_source_rank", "attended"], ascending=[False, False])
     df = df.drop_duplicates(subset=list(MEMBER_SESSION_KEY_COLUMNS), keep="first")
     df = df.drop(columns=["_source_rank"])
 

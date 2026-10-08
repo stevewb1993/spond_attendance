@@ -496,26 +496,32 @@ class TestDepartedMembersSurvive:
         assert len(rows_after) == len(rows_before)
         assert rows_after["attended"].sum() == rows_before["attended"].sum()
 
-    def test_a_later_register_counts_and_no_attendance_is_lost(self, tmp_path: Path):
-        """Registers get completed after an export has been taken.
+    def test_merged_figures_match_the_newer_export(self, tmp_path: Path):
+        """Two real sessions pin both ways an export can revise a register.
 
-        Between these two exports 39 blanks are filled in and 9 recorded
-        attendances are blanked out again; the highest value wins both ways.
+        The March 2024 export reports the 13 March club run as 3 and the
+        12 March indoor bike as 14. The April export completes the club
+        run register to 8, and leaves the indoor bike at 14 while marking
+        four of its attendees absent and four others present. Both merged
+        figures must follow the April export: 8 and 14. Taking the highest
+        value per member instead gives 14 and 18.
         """
         input_dir = tmp_path / "input"
         input_dir.mkdir()
         output_dir = tmp_path / "output"
 
-        before = self._run(input_dir, output_dir, "spond_attendance_2024-03.xlsx")
-        after = self._run(input_dir, output_dir, "spond_attendance_2024-04.xlsx")
+        self._run(input_dir, output_dir, "spond_attendance_2024-03.xlsx")
+        self._run(input_dir, output_dir, "spond_attendance_2024-04.xlsx")
 
-        key = list(MEMBER_SESSION_KEY_COLUMNS)
-        merged = before.merge(
-            after, on=key, how="inner", suffixes=("_before", "_after")
-        )
-        assert (merged["attended_after"] >= merged["attended_before"]).all(), (
-            "an attendance recorded earlier was dropped"
-        )
-        assert merged["attended_after"].sum() > merged["attended_before"].sum(), (
-            "blanks filled in by the later export were not picked up"
-        )
+        summary = pd.read_csv(output_dir / "session_attendance.csv", sep="|")
+
+        def figure(session_name: str, session_date: str) -> int:
+            row = summary[
+                (summary["session_name"] == session_name)
+                & (summary["session_date"] == session_date)
+            ]
+            assert len(row) == 1
+            return int(row.iloc[0]["attended"])
+
+        assert figure("Club Run Session - Green Members", "2024-03-13") == 8
+        assert figure("Indoor Bike", "2024-03-12") == 14
