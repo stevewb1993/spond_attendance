@@ -326,12 +326,12 @@ class TestDedupOlderWins:
         for p in paths:
             raw = io.read_attendance_file(p)
             long = transform.transform_file(raw)
-            # Filter to past dates (matching _deduplicate behaviour).
+            # Filter to past dates (matching deduplicate behaviour).
             long = long[long["session_date"] < date.today()]
             individual_total += len(long)
 
         # Process them together (with deduplication).
-        combined = transform.process_files(paths)
+        combined = transform.deduplicate(transform.load_files(paths))
 
         assert len(combined) < individual_total, (
             f"Expected dedup to reduce row count, but got "
@@ -415,3 +415,39 @@ class TestIncrementalNameMapping:
         assert duplicates.empty, (
             f"{len(duplicates)} duplicated member/session rows after merge"
         )
+
+
+@data_dir_exists
+class TestDuplicatedSpondSession:
+    """A session held twice in Spond, with one copy empty, keeps its register.
+
+    On 2025-04-02 the club run appears as two 18:45 columns whose raw names
+    differ only in case; one records 10 attendances and the other none.
+    """
+
+    CLUB_RUN = "Club Run Session - Green Members"
+
+    def test_empty_copy_does_not_erase_or_double_attendance(self, tmp_path: Path):
+        input_dir = tmp_path / "input"
+        input_dir.mkdir()
+        shutil.copy(
+            DATA_DIR / "spond_attendance_2025-04.xlsx",
+            input_dir / "spond_attendance_2025-04.xlsx",
+        )
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        (output_dir / "session_name_mappings.csv").write_text(
+            "raw_session_name,parsed_session_name\n"
+            f"Club Run Session - update self led session ( no coach),{self.CLUB_RUN}\n"
+            f"Club Run Session - Update self led session ( no coach),{self.CLUB_RUN}\n"
+        )
+
+        main([str(input_dir), "-o", str(output_dir), "--no-llm"])
+
+        summary = pd.read_csv(output_dir / "session_attendance.csv", sep="|")
+        row = summary[
+            (summary["session_name"] == self.CLUB_RUN)
+            & (summary["session_date"] == "2025-04-02")
+        ]
+        assert len(row) == 1
+        assert int(row.iloc[0]["attended"]) == 10

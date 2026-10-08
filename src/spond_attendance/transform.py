@@ -115,27 +115,24 @@ def transform_file(df: pd.DataFrame) -> pd.DataFrame:
     return melted[list(DETAIL_COLUMNS)]
 
 
-def process_files(files: list[Path]) -> pd.DataFrame:
-    """Process multiple attendance files with deduplication.
+def load_files(files: list[Path]) -> pd.DataFrame:
+    """Read and transform multiple attendance files into one long frame.
 
-    Files must be sorted oldest-first. When a session appears in
-    multiple files, the oldest version wins (members who leave the
-    club disappear from newer exports).
-
-    Session names are still raw here; callers must map them to canonical
-    names before merging with previously written output.
+    Files must be sorted oldest-first; each row is tagged with its file's
+    rank in that order. Session names are still raw, and nothing is
+    deduplicated yet: callers map the names to canonical ones first, then
+    call deduplicate. Mapping afterwards would leave two rows for a
+    session whose raw names differ only in the source export.
     """
     from .io import read_attendance_file
 
     all_frames = []
     for file_rank, path in enumerate(files):
-        raw_df = read_attendance_file(path)
-        long_df = transform_file(raw_df)
+        long_df = transform_file(read_attendance_file(path))
         long_df["_source_rank"] = file_rank
         all_frames.append(long_df)
 
-    combined = pd.concat(all_frames, ignore_index=True)
-    return _deduplicate(combined)
+    return pd.concat(all_frames, ignore_index=True)
 
 
 def merge_with_existing(existing: pd.DataFrame, new: pd.DataFrame) -> pd.DataFrame:
@@ -147,12 +144,17 @@ def merge_with_existing(existing: pd.DataFrame, new: pd.DataFrame) -> pd.DataFra
     existing["_source_rank"] = 0
     new["_source_rank"] = 1
     combined = pd.concat([existing, new], ignore_index=True)
-    return _deduplicate(combined)
+    return deduplicate(combined)
 
 
-def _deduplicate(df: pd.DataFrame) -> pd.DataFrame:
+def deduplicate(df: pd.DataFrame) -> pd.DataFrame:
     """Deduplicate rows: for each session key, keep the row from the
-    lowest _source_rank (oldest source wins)."""
+    lowest _source_rank (oldest source wins).
+
+    Within one source, a recorded attendance wins, because a key can
+    collide there only when Spond holds the same session twice (often
+    with one copy left empty).
+    """
     missing = [c for c in SESSION_KEY_COLUMNS if c not in df.columns]
     if missing:
         raise KeyError(
@@ -161,7 +163,7 @@ def _deduplicate(df: pd.DataFrame) -> pd.DataFrame:
 
     today = date.today()
 
-    df = df.sort_values("_source_rank")
+    df = df.sort_values(["_source_rank", "attended"], ascending=[True, False])
     df = df.drop_duplicates(subset=list(SESSION_KEY_COLUMNS), keep="first")
     df = df.drop(columns=["_source_rank"])
 

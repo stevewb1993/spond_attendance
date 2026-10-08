@@ -10,9 +10,9 @@ import pandas as pd
 import pytest
 
 from spond_attendance.transform import (
-    _deduplicate,
     _extract_session_info,
     _parse_session_column,
+    deduplicate,
     generate_outputs,
     merge_with_existing,
     transform_file,
@@ -332,7 +332,7 @@ class TestDeduplicate:
                 },
             ]
         )
-        result = _deduplicate(df)
+        result = deduplicate(df)
         assert len(result) == 1
         assert result.iloc[0]["attended"] == 1
 
@@ -359,7 +359,7 @@ class TestDeduplicate:
                 },
             ]
         )
-        result = _deduplicate(df)
+        result = deduplicate(df)
         assert list(result["name"]) == ["Alice", "Bob"]
 
     def test_same_name_and_date_but_different_times_both_kept(self):
@@ -390,10 +390,67 @@ class TestDeduplicate:
                 },
             ]
         )
-        result = _deduplicate(df)
+        result = deduplicate(df)
 
         assert len(result) == 2
         assert result["attended"].sum() == 1
+
+    def test_recorded_attendance_wins_within_one_source(self):
+        """Spond sometimes holds one session twice, with a copy left empty."""
+        df = pd.DataFrame(
+            [
+                {
+                    "name": "Alice",
+                    "session_name": "Club Run",
+                    "session_date": date(2024, 1, 10),
+                    "session_time": "18:45",
+                    "session_day_of_week": "Wednesday",
+                    "attended": 0,
+                    "_source_rank": 0,
+                },
+                {
+                    "name": "Alice",
+                    "session_name": "Club Run",
+                    "session_date": date(2024, 1, 10),
+                    "session_time": "18:45",
+                    "session_day_of_week": "Wednesday",
+                    "attended": 1,
+                    "_source_rank": 0,
+                },
+            ]
+        )
+        result = deduplicate(df)
+
+        assert len(result) == 1
+        assert result.iloc[0]["attended"] == 1
+
+    def test_older_source_still_wins_over_a_later_attendance(self):
+        df = pd.DataFrame(
+            [
+                {
+                    "name": "Alice",
+                    "session_name": "Club Run",
+                    "session_date": date(2024, 1, 10),
+                    "session_time": "18:45",
+                    "session_day_of_week": "Wednesday",
+                    "attended": 0,
+                    "_source_rank": 0,
+                },
+                {
+                    "name": "Alice",
+                    "session_name": "Club Run",
+                    "session_date": date(2024, 1, 10),
+                    "session_time": "18:45",
+                    "session_day_of_week": "Wednesday",
+                    "attended": 1,
+                    "_source_rank": 1,
+                },
+            ]
+        )
+        result = deduplicate(df)
+
+        assert len(result) == 1
+        assert result.iloc[0]["attended"] == 0
 
     def test_missing_session_time_raises(self):
         df = pd.DataFrame(
@@ -409,7 +466,7 @@ class TestDeduplicate:
             ]
         )
         with pytest.raises(KeyError, match="session_time"):
-            _deduplicate(df)
+            deduplicate(df)
 
 
 # ---------------------------------------------------------------------------

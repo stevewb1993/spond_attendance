@@ -22,7 +22,7 @@ from .mapping import (
     suggest_categories,
     suggest_mappings,
 )
-from .transform import generate_outputs, merge_with_existing, process_files
+from .transform import deduplicate, generate_outputs, load_files, merge_with_existing
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -103,19 +103,20 @@ def main(argv: list[str] | None = None) -> None:
     for f in files_to_process:
         print(f"  {f.name}")
 
-    new_data = process_files(files_to_process)
+    raw_data = load_files(files_to_process)
 
     # Session name mapping: normalize raw names to canonical parsed names.
-    # This must happen before merging with existing output, which already
-    # holds canonical names — otherwise the same session survives the merge
-    # under two names and its attendance is counted twice.
+    # This must happen before deduplication. Existing output already holds
+    # canonical names, and one session can carry different raw names in
+    # different exports — map later and the duplicates survive, doubling
+    # that session's attendance.
     mappings_path = output_dir / "session_name_mappings.csv"
     types_path = output_dir / "session_types.csv"
 
     mappings = load_name_mappings(mappings_path)
     canonical_names = load_canonical_names(types_path)
 
-    all_session_names = set(new_data["session_name"].unique())
+    all_session_names = set(raw_data["session_name"].unique())
     unmapped = find_unmapped_names(all_session_names, mappings, canonical_names)
 
     if unmapped:
@@ -143,7 +144,7 @@ def main(argv: list[str] | None = None) -> None:
                 "\n(Skipping LLM suggestions — use without --no-llm to get suggestions)"
             )
 
-    new_data = apply_name_mappings(new_data, mappings)
+    new_data = deduplicate(apply_name_mappings(raw_data, mappings))
 
     if incremental and existing_csv.exists():
         existing = pd.read_csv(existing_csv, sep="|", parse_dates=["session_date"])
