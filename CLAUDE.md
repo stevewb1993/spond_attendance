@@ -8,7 +8,7 @@ This project processes Spond attendance exports into tidy CSVs for analysis and 
 Aggregated attendance per session. Columns: `session_name|session_date|session_day_of_week|attended` (attended = headcount).
 
 ### `spond.csv` (pipe-separated)
-Per-member attendance. Columns: `name|session_name|session_date|session_day_of_week|attended` (attended = 0 or 1).
+Per-member attendance. Columns: `name|session_name|session_date|session_time|session_day_of_week|attended` (attended = 0 or 1). `session_time` is the session start time (`HH:MM`); it is part of a session's identity, so two sessions on one date are kept apart even when they share a name.
 
 ### `session_types.csv` (comma-separated)
 Maps session names to categories: Swim, Bike, Run, S&C, Other.

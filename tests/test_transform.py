@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, time
 from pathlib import Path
 
 import numpy as np
@@ -141,8 +141,8 @@ class TestExtractSessionInfo:
         assert len(info) == 2
 
         # Stars stripped from session names
-        assert info[dt_a] == ("Session A", date(2025, 4, 12))  # ty: ignore[invalid-argument-type]
-        assert info[dt_b] == ("Session B", date(2025, 4, 12))  # ty: ignore[invalid-argument-type]
+        assert info[dt_a] == ("Session A", date(2025, 4, 12), time(14, 0))  # ty: ignore[invalid-argument-type]
+        assert info[dt_b] == ("Session B", date(2025, 4, 12), time(8, 0))  # ty: ignore[invalid-argument-type]
 
     def test_non_datetime_columns_ignored(self):
         dt = datetime(2025, 4, 12, 14, 0)
@@ -180,6 +180,7 @@ class TestTransformFile:
             "name",
             "session_name",
             "session_date",
+            "session_time",
             "session_day_of_week",
             "attended",
         ]
@@ -246,11 +247,14 @@ class TestTransformFile:
 
 
 class TestMergeWithExisting:
-    def _make_long_row(self, name, session_name, session_date, attended):
+    def _make_long_row(
+        self, name, session_name, session_date, attended, session_time="19:00"
+    ):
         return {
             "name": name,
             "session_name": session_name,
             "session_date": session_date,
+            "session_time": session_time,
             "session_day_of_week": session_date.strftime("%A"),
             "attended": attended,
         }
@@ -312,6 +316,7 @@ class TestDeduplicate:
                     "name": "Alice",
                     "session_name": "Training",
                     "session_date": date(2024, 1, 10),
+                    "session_time": "19:00",
                     "session_day_of_week": "Wednesday",
                     "attended": 1,
                     "_source_rank": 0,
@@ -320,6 +325,7 @@ class TestDeduplicate:
                     "name": "Alice",
                     "session_name": "Training",
                     "session_date": date(2024, 1, 10),
+                    "session_time": "19:00",
                     "session_day_of_week": "Wednesday",
                     "attended": 0,
                     "_source_rank": 1,
@@ -337,10 +343,61 @@ class TestDeduplicate:
                     "name": "Bob",
                     "session_name": "Training",
                     "session_date": date(2024, 2, 1),
+                    "session_time": "19:00",
                     "session_day_of_week": "Thursday",
                     "attended": 1,
                     "_source_rank": 0,
                 },
+                {
+                    "name": "Alice",
+                    "session_name": "Training",
+                    "session_date": date(2024, 1, 10),
+                    "session_time": "19:00",
+                    "session_day_of_week": "Wednesday",
+                    "attended": 1,
+                    "_source_rank": 0,
+                },
+            ]
+        )
+        result = _deduplicate(df)
+        assert list(result["name"]) == ["Alice", "Bob"]
+
+    def test_same_name_and_date_but_different_times_both_kept(self):
+        """Two sessions sharing a name and date are distinct if their times differ.
+
+        Mapping raw Spond names to canonical ones can give the morning and
+        evening runs on one date the same name; they must not collapse.
+        """
+        df = pd.DataFrame(
+            [
+                {
+                    "name": "Alice",
+                    "session_name": "Social Run",
+                    "session_date": date(2024, 1, 12),
+                    "session_time": "07:00",
+                    "session_day_of_week": "Friday",
+                    "attended": 0,
+                    "_source_rank": 0,
+                },
+                {
+                    "name": "Alice",
+                    "session_name": "Social Run",
+                    "session_date": date(2024, 1, 12),
+                    "session_time": "19:00",
+                    "session_day_of_week": "Friday",
+                    "attended": 1,
+                    "_source_rank": 0,
+                },
+            ]
+        )
+        result = _deduplicate(df)
+
+        assert len(result) == 2
+        assert result["attended"].sum() == 1
+
+    def test_missing_session_time_raises(self):
+        df = pd.DataFrame(
+            [
                 {
                     "name": "Alice",
                     "session_name": "Training",
@@ -351,8 +408,8 @@ class TestDeduplicate:
                 },
             ]
         )
-        result = _deduplicate(df)
-        assert list(result["name"]) == ["Alice", "Bob"]
+        with pytest.raises(KeyError, match="session_time"):
+            _deduplicate(df)
 
 
 # ---------------------------------------------------------------------------
@@ -368,6 +425,7 @@ class TestGenerateOutputs:
                     "name": "Alice",
                     "session_name": "Training",
                     "session_date": date(2024, 1, 10),
+                    "session_time": "19:00",
                     "session_day_of_week": "Wednesday",
                     "attended": 1,
                 },
@@ -375,6 +433,7 @@ class TestGenerateOutputs:
                     "name": "Bob",
                     "session_name": "Training",
                     "session_date": date(2024, 1, 10),
+                    "session_time": "19:00",
                     "session_day_of_week": "Wednesday",
                     "attended": 1,
                 },
@@ -382,6 +441,7 @@ class TestGenerateOutputs:
                     "name": "Alice",
                     "session_name": "Match",
                     "session_date": date(2024, 1, 12),
+                    "session_time": "19:00",
                     "session_day_of_week": "Friday",
                     "attended": 0,
                 },
@@ -401,6 +461,7 @@ class TestGenerateOutputs:
                     "name": "Alice",
                     "session_name": "Training",
                     "session_date": date(2024, 1, 10),
+                    "session_time": "19:00",
                     "session_day_of_week": "Wednesday",
                     "attended": 1,
                 },
@@ -412,9 +473,8 @@ class TestGenerateOutputs:
         assert "|" in detail_content
         # Pipe should be the separator; commas should not appear as separators
         detail_lines = detail_content.strip().splitlines()
-        assert (
-            detail_lines[0]
-            == "name|session_name|session_date|session_day_of_week|attended"
+        assert detail_lines[0] == (
+            "name|session_name|session_date|session_time|session_day_of_week|attended"
         )
 
         summary_content = summary_path.read_text()
@@ -430,6 +490,7 @@ class TestGenerateOutputs:
                     "name": "Alice",
                     "session_name": "Training",
                     "session_date": date(2024, 1, 10),
+                    "session_time": "19:00",
                     "session_day_of_week": "Wednesday",
                     "attended": 1,
                 },
@@ -437,6 +498,7 @@ class TestGenerateOutputs:
                     "name": "Bob",
                     "session_name": "Training",
                     "session_date": date(2024, 1, 10),
+                    "session_time": "19:00",
                     "session_day_of_week": "Wednesday",
                     "attended": 1,
                 },
@@ -444,6 +506,7 @@ class TestGenerateOutputs:
                     "name": "Charlie",
                     "session_name": "Training",
                     "session_date": date(2024, 1, 10),
+                    "session_time": "19:00",
                     "session_day_of_week": "Wednesday",
                     "attended": 0,
                 },
@@ -451,6 +514,7 @@ class TestGenerateOutputs:
                     "name": "Alice",
                     "session_name": "Match",
                     "session_date": date(2024, 1, 12),
+                    "session_time": "19:00",
                     "session_day_of_week": "Friday",
                     "attended": 1,
                 },
@@ -474,6 +538,7 @@ class TestGenerateOutputs:
                     "name": "Alice",
                     "session_name": "Training",
                     "session_date": date(2024, 1, 10),
+                    "session_time": "19:00",
                     "session_day_of_week": "Wednesday",
                     "attended": 1,
                 },

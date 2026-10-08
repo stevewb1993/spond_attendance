@@ -3,10 +3,27 @@
 from __future__ import annotations
 
 import re
-from datetime import date, datetime
+from datetime import date, datetime, time
 from pathlib import Path
 
 import pandas as pd
+
+TIME_FORMAT = "%H:%M"
+
+DETAIL_COLUMNS = (
+    "name",
+    "session_name",
+    "session_date",
+    "session_time",
+    "session_day_of_week",
+    "attended",
+)
+
+# A session is identified by its name, date, and start time. The start time
+# matters because two different sessions can share a date and, once raw Spond
+# names are mapped to a canonical name, a name too (e.g. the morning and
+# evening Friday social runs).
+SESSION_KEY_COLUMNS = ("name", "session_name", "session_date", "session_time")
 
 
 def _parse_session_column(col) -> datetime | None:
@@ -28,20 +45,19 @@ def _parse_session_column(col) -> datetime | None:
     return None
 
 
-def _extract_session_info(df: pd.DataFrame) -> dict[str, tuple[str, date]]:
-    """Build a mapping from column label to (session_name, session_date).
+def _extract_session_info(df: pd.DataFrame) -> dict[str, tuple[str, date, time]]:
+    """Build a mapping from column label to (session_name, session_date, session_time).
 
     Row 0 of the dataframe contains session names in session columns
     (and NaN in non-session columns). The column header itself is the
     session datetime.
     """
-    session_info: dict[str, tuple[str, date]] = {}
+    session_info: dict[str, tuple[str, date, time]] = {}
     for col in df.columns:
         dt = _parse_session_column(col)
         if dt is not None:
             session_name = str(df[col].iloc[0]).strip().rstrip("*").strip()
-            session_date = dt.date()
-            session_info[col] = (session_name, session_date)
+            session_info[col] = (session_name, dt.date(), dt.time())
     return session_info
 
 
@@ -49,7 +65,8 @@ def transform_file(df: pd.DataFrame) -> pd.DataFrame:
     """Transform a single attendance file from wide to long format.
 
     Returns DataFrame with columns:
-        name, session_name, session_date, session_day_of_week, attended
+        name, session_name, session_date, session_time,
+        session_day_of_week, attended
     """
     session_info = _extract_session_info(df)
     if not session_info:
@@ -77,9 +94,12 @@ def transform_file(df: pd.DataFrame) -> pd.DataFrame:
         value_name="attended",
     )
 
-    # Map session column back to session name and date
+    # Map session column back to session name, date, and start time
     melted["session_name"] = melted["_session_col"].map(lambda c: session_info[c][0])
     melted["session_date"] = melted["_session_col"].map(lambda c: session_info[c][1])
+    melted["session_time"] = melted["_session_col"].map(
+        lambda c: session_info[c][2].strftime(TIME_FORMAT)
+    )
     melted["session_day_of_week"] = melted["session_date"].apply(
         lambda d: d.strftime("%A")
     )
@@ -92,9 +112,7 @@ def transform_file(df: pd.DataFrame) -> pd.DataFrame:
         pd.to_numeric(melted["attended"], errors="coerce").fillna(0).astype(int)
     )
 
-    return melted[
-        ["name", "session_name", "session_date", "session_day_of_week", "attended"]
-    ]
+    return melted[list(DETAIL_COLUMNS)]
 
 
 def process_files(files: list[Path]) -> pd.DataFrame:
@@ -103,6 +121,9 @@ def process_files(files: list[Path]) -> pd.DataFrame:
     Files must be sorted oldest-first. When a session appears in
     multiple files, the oldest version wins (members who leave the
     club disappear from newer exports).
+
+    Session names are still raw here; callers must map them to canonical
+    names before merging with previously written output.
     """
     from .io import read_attendance_file
 
@@ -130,23 +151,26 @@ def merge_with_existing(existing: pd.DataFrame, new: pd.DataFrame) -> pd.DataFra
 
 
 def _deduplicate(df: pd.DataFrame) -> pd.DataFrame:
-    """Deduplicate rows: for each (name, session_name, session_date),
-    keep the row from the lowest _source_rank (oldest source wins)."""
+    """Deduplicate rows: for each session key, keep the row from the
+    lowest _source_rank (oldest source wins)."""
+    missing = [c for c in SESSION_KEY_COLUMNS if c not in df.columns]
+    if missing:
+        raise KeyError(
+            f"Cannot deduplicate without session key column(s): {', '.join(missing)}"
+        )
+
     today = date.today()
 
     df = df.sort_values("_source_rank")
-    df = df.drop_duplicates(
-        subset=["name", "session_name", "session_date"],
-        keep="first",
-    )
+    df = df.drop_duplicates(subset=list(SESSION_KEY_COLUMNS), keep="first")
     df = df.drop(columns=["_source_rank"])
 
     # Filter out future sessions
     df = df[df["session_date"] < today]
 
-    return df.sort_values(["session_date", "session_name", "name"]).reset_index(
-        drop=True
-    )
+    return df.sort_values(
+        ["session_date", "session_time", "session_name", "name"]
+    ).reset_index(drop=True)
 
 
 def generate_outputs(df: pd.DataFrame, output_dir: Path) -> tuple[Path, Path]:

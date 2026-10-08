@@ -55,6 +55,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _has_session_times(detail_csv: Path) -> bool:
+    """Whether an existing spond.csv carries the session_time column."""
+    header = pd.read_csv(detail_csv, sep="|", nrows=0)
+    return "session_time" in header.columns
+
+
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
 
@@ -73,11 +79,21 @@ def main(argv: list[str] | None = None) -> None:
         )
         sys.exit(1)
 
-    if args.full_refresh:
-        files_to_process = all_files
-    else:
+    existing_csv = output_dir / "spond.csv"
+    incremental = not args.full_refresh
+
+    if incremental and existing_csv.exists() and not _has_session_times(existing_csv):
+        print(
+            f"{existing_csv.name} was written before session start times were "
+            "tracked — reprocessing all files."
+        )
+        incremental = False
+
+    if incremental:
         processed = load_state(output_dir)
         files_to_process = find_new_files(all_files, processed)
+    else:
+        files_to_process = all_files
 
     if not files_to_process:
         print("No new files to process.")
@@ -89,23 +105,17 @@ def main(argv: list[str] | None = None) -> None:
 
     new_data = process_files(files_to_process)
 
-    # Merge with existing output if doing incremental processing
-    existing_csv = output_dir / "spond.csv"
-    if not args.full_refresh and existing_csv.exists():
-        existing = pd.read_csv(existing_csv, sep="|", parse_dates=["session_date"])
-        existing["session_date"] = existing["session_date"].dt.date
-        result = merge_with_existing(existing, new_data)
-    else:
-        result = new_data
-
-    # Session name mapping: normalize raw names to canonical parsed names
+    # Session name mapping: normalize raw names to canonical parsed names.
+    # This must happen before merging with existing output, which already
+    # holds canonical names — otherwise the same session survives the merge
+    # under two names and its attendance is counted twice.
     mappings_path = output_dir / "session_name_mappings.csv"
     types_path = output_dir / "session_types.csv"
 
     mappings = load_name_mappings(mappings_path)
     canonical_names = load_canonical_names(types_path)
 
-    all_session_names = set(result["session_name"].unique())
+    all_session_names = set(new_data["session_name"].unique())
     unmapped = find_unmapped_names(all_session_names, mappings, canonical_names)
 
     if unmapped:
@@ -133,7 +143,15 @@ def main(argv: list[str] | None = None) -> None:
                 "\n(Skipping LLM suggestions — use without --no-llm to get suggestions)"
             )
 
-    result = apply_name_mappings(result, mappings)
+    new_data = apply_name_mappings(new_data, mappings)
+
+    if incremental and existing_csv.exists():
+        existing = pd.read_csv(existing_csv, sep="|", parse_dates=["session_date"])
+        existing["session_date"] = existing["session_date"].dt.date
+        existing = apply_name_mappings(existing, mappings)
+        result = merge_with_existing(existing, new_data)
+    else:
+        result = new_data
 
     # Categorize session names missing from session_types.csv
     # Exclude names that were explicitly skipped in the mapping step
@@ -165,13 +183,13 @@ def main(argv: list[str] | None = None) -> None:
 
     # Update state with all files that are now accounted for
     all_processed = (
-        {f.name for f in all_files}
-        if args.full_refresh
-        else load_state(output_dir) | {f.name for f in files_to_process}
+        load_state(output_dir) | {f.name for f in files_to_process}
+        if incremental
+        else {f.name for f in all_files}
     )
     save_state(output_dir, all_processed)
 
-    sessions = result.groupby(["session_name", "session_date"]).ngroups
+    sessions = result.groupby(["session_name", "session_date", "session_time"]).ngroups
     print("\nOutput written:")
     print(f"  {detail_path}  ({len(result)} rows)")
     print(f"  {summary_path}  ({sessions} sessions)")

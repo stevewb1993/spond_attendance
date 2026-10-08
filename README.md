@@ -7,8 +7,8 @@ Processes Spond attendance Excel exports (.xlsx) into tidy CSV files for analysi
 Spond exports attendance data in wide format, with sessions as columns and members as rows. This tool:
 
 1. Reads `spond_attendance_*.xlsx` files from an input directory
-2. Transforms wide-format data into long/tidy format (name, session_name, session_date, day_of_week, attended)
-3. Deduplicates across files -- the oldest source wins, since departed members disappear from newer exports
+2. Transforms wide-format data into long/tidy format (name, session_name, session_date, session_time, day_of_week, attended)
+3. Normalizes raw session names to canonical ones, then deduplicates across files -- the oldest source wins, since departed members disappear from newer exports
 4. Supports incremental processing by tracking which files have already been handled
 5. Optionally uses Claude CLI to suggest session name mappings and categories for unmapped sessions
 6. Outputs two CSV files:
@@ -45,7 +45,7 @@ spond-attendance <input_dir> [-o output_dir] [--full-refresh] [--no-llm]
 |---|---|
 | `input_dir` | Directory containing `spond_attendance_*.xlsx` files |
 | `-o output_dir` | Output directory (defaults to `output_data/` in current directory) |
-| `--full-refresh` | Reprocess all files, ignoring saved state |
+| `--full-refresh` | Reprocess all files, ignoring saved state. Applied automatically when the existing `spond.csv` predates session-time tracking |
 | `--no-llm` | Skip Claude API suggestions for unmapped session names |
 
 Example:

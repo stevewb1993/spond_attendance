@@ -11,6 +11,7 @@ import pytest
 
 from spond_attendance import io, transform
 from spond_attendance.cli import main
+from spond_attendance.transform import SESSION_KEY_COLUMNS
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
@@ -75,6 +76,7 @@ class TestSingleFileProcessing:
             "name",
             "session_name",
             "session_date",
+            "session_time",
             "session_day_of_week",
             "attended",
         ]
@@ -231,6 +233,7 @@ class TestFullPipeline:
             "name",
             "session_name",
             "session_date",
+            "session_time",
             "session_day_of_week",
             "attended",
         ]
@@ -336,3 +339,79 @@ class TestDedupOlderWins:
         )
         # The combined result should still have a reasonable number of rows.
         assert len(combined) > 0
+
+
+# ---------------------------------------------------------------------------
+# test_incremental_name_mapping
+# ---------------------------------------------------------------------------
+
+
+@data_dir_exists
+class TestIncrementalNameMapping:
+    """Incremental runs must not double-count renamed sessions.
+
+    An earlier version deduplicated before mapping raw Spond names to
+    canonical ones, so a session already written under its canonical name
+    survived the merge again under its raw name and its attendance doubled.
+    """
+
+    AQUATHLON = "STV Swim - Aquathlon"
+    AQUATHLON_DATE = "2026-07-25"
+
+    @pytest.fixture()
+    def output_dir(self, tmp_path: Path) -> Path:
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        (output_dir / "session_name_mappings.csv").write_text(
+            "raw_session_name,parsed_session_name\n"
+            f"STV Swim - club aquathon,{self.AQUATHLON}\n"
+        )
+        (output_dir / "session_types.csv").write_text(
+            f"session_name,category\n{self.AQUATHLON},Swim\n"
+        )
+        return output_dir
+
+    @staticmethod
+    def _input_dir(tmp_path: Path, *names: str) -> Path:
+        input_dir = tmp_path / "input"
+        input_dir.mkdir(exist_ok=True)
+        for name in names:
+            shutil.copy(DATA_DIR / name, input_dir / name)
+        return input_dir
+
+    def _attendance(self, output_dir: Path) -> int:
+        summary = pd.read_csv(output_dir / "session_attendance.csv", sep="|")
+        row = summary[
+            (summary["session_name"] == self.AQUATHLON)
+            & (summary["session_date"] == self.AQUATHLON_DATE)
+        ]
+        assert len(row) == 1
+        return int(row.iloc[0]["attended"])
+
+    def test_attendance_unchanged_by_a_later_export(
+        self, tmp_path: Path, output_dir: Path
+    ):
+        input_dir = self._input_dir(tmp_path, "spond_attendance_2026-08.xlsx")
+        main([str(input_dir), "-o", str(output_dir), "--no-llm"])
+        first_run = self._attendance(output_dir)
+        assert first_run == 20
+
+        # A later export reports the same session under its raw name again.
+        self._input_dir(tmp_path, "spond_attendance_2026-10.xlsx")
+        main([str(input_dir), "-o", str(output_dir), "--no-llm"])
+
+        assert self._attendance(output_dir) == first_run
+
+    def test_no_duplicate_session_keys_after_merge(
+        self, tmp_path: Path, output_dir: Path
+    ):
+        input_dir = self._input_dir(tmp_path, "spond_attendance_2026-08.xlsx")
+        main([str(input_dir), "-o", str(output_dir), "--no-llm"])
+        self._input_dir(tmp_path, "spond_attendance_2026-10.xlsx")
+        main([str(input_dir), "-o", str(output_dir), "--no-llm"])
+
+        detail = pd.read_csv(output_dir / "spond.csv", sep="|")
+        duplicates = detail[detail.duplicated(subset=list(SESSION_KEY_COLUMNS))]
+        assert duplicates.empty, (
+            f"{len(duplicates)} duplicated member/session rows after merge"
+        )
