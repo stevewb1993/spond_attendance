@@ -22,7 +22,14 @@ from .mapping import (
     suggest_categories,
     suggest_mappings,
 )
-from .transform import deduplicate, generate_outputs, load_files, merge_with_existing
+from .transform import (
+    DETAIL_COLUMNS,
+    SUMMARY_GROUP_COLUMNS,
+    deduplicate,
+    generate_outputs,
+    load_files,
+    merge_with_existing,
+)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -55,10 +62,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _has_session_times(detail_csv: Path) -> bool:
-    """Whether an existing spond.csv carries the session_time column."""
-    header = pd.read_csv(detail_csv, sep="|", nrows=0)
-    return "session_time" in header.columns
+def _missing_detail_columns(detail_csv: Path) -> list[str]:
+    """Detail columns an existing spond.csv does not carry.
+
+    An unreadable or empty file counts as missing everything.
+    """
+    try:
+        header = pd.read_csv(detail_csv, sep="|", nrows=0)
+    except (pd.errors.EmptyDataError, pd.errors.ParserError):
+        return list(DETAIL_COLUMNS)
+    return [c for c in DETAIL_COLUMNS if c not in header.columns]
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -82,12 +95,18 @@ def main(argv: list[str] | None = None) -> None:
     existing_csv = output_dir / "spond.csv"
     incremental = not args.full_refresh
 
-    if incremental and existing_csv.exists() and not _has_session_times(existing_csv):
-        print(
-            f"{existing_csv.name} was written before session start times were "
-            "tracked — reprocessing all files."
-        )
-        incremental = False
+    if incremental and existing_csv.exists():
+        missing = _missing_detail_columns(existing_csv)
+        if missing:
+            print(
+                f"Error: {existing_csv} cannot be merged into — it is missing "
+                f"{', '.join(missing)}, so it predates the current output format.\n"
+                f"Re-run with --full-refresh to rebuild it from the exports in "
+                f"{input_dir}. Sessions whose export is no longer in that "
+                f"directory will be lost.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
     if incremental:
         processed = load_state(output_dir)
@@ -105,11 +124,7 @@ def main(argv: list[str] | None = None) -> None:
 
     raw_data = load_files(files_to_process)
 
-    # Session name mapping: normalize raw names to canonical parsed names.
-    # This must happen before deduplication. Existing output already holds
-    # canonical names, and one session can carry different raw names in
-    # different exports — map later and the duplicates survive, doubling
-    # that session's attendance.
+    # Session names must be mapped to canonical ones before deduplication.
     mappings_path = output_dir / "session_name_mappings.csv"
     types_path = output_dir / "session_types.csv"
 
@@ -190,7 +205,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     save_state(output_dir, all_processed)
 
-    sessions = result.groupby(["session_name", "session_date", "session_time"]).ngroups
+    sessions = result.groupby(list(SUMMARY_GROUP_COLUMNS)).ngroups
     print("\nOutput written:")
     print(f"  {detail_path}  ({len(result)} rows)")
     print(f"  {summary_path}  ({sessions} sessions)")

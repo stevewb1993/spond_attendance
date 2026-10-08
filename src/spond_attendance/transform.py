@@ -19,11 +19,16 @@ DETAIL_COLUMNS = (
     "attended",
 )
 
-# A session is identified by its name, date, and start time. The start time
-# matters because two different sessions can share a date and, once raw Spond
-# names are mapped to a canonical name, a name too (e.g. the morning and
-# evening Friday social runs).
-SESSION_KEY_COLUMNS = ("name", "session_name", "session_date", "session_time")
+# Start time is part of a session's identity because two different sessions
+# can share a date and, once raw Spond names are mapped to a canonical name,
+# a name too (e.g. the morning and evening Friday social runs).
+SESSION_IDENTITY_COLUMNS = ("session_name", "session_date", "session_time")
+
+MEMBER_SESSION_KEY_COLUMNS = ("name", *SESSION_IDENTITY_COLUMNS)
+
+# The summary deliberately leaves session_time out, so two sessions sharing a
+# name and date (the morning and evening social runs) report as one figure.
+SUMMARY_GROUP_COLUMNS = ("session_name", "session_date", "session_day_of_week")
 
 
 def _parse_session_column(col) -> datetime | None:
@@ -95,13 +100,17 @@ def transform_file(df: pd.DataFrame) -> pd.DataFrame:
     )
 
     # Map session column back to session name, date, and start time
-    melted["session_name"] = melted["_session_col"].map(lambda c: session_info[c][0])
-    melted["session_date"] = melted["_session_col"].map(lambda c: session_info[c][1])
-    melted["session_time"] = melted["_session_col"].map(
-        lambda c: session_info[c][2].strftime(TIME_FORMAT)
+    melted["session_name"] = melted["_session_col"].map(
+        {col: info[0] for col, info in session_info.items()}
     )
-    melted["session_day_of_week"] = melted["session_date"].apply(
-        lambda d: d.strftime("%A")
+    melted["session_date"] = melted["_session_col"].map(
+        {col: info[1] for col, info in session_info.items()}
+    )
+    melted["session_time"] = melted["_session_col"].map(
+        {col: info[2].strftime(TIME_FORMAT) for col, info in session_info.items()}
+    )
+    melted["session_day_of_week"] = melted["_session_col"].map(
+        {col: info[1].strftime("%A") for col, info in session_info.items()}
     )
 
     melted = melted.drop(columns=["_session_col"])
@@ -155,16 +164,15 @@ def deduplicate(df: pd.DataFrame) -> pd.DataFrame:
     collide there only when Spond holds the same session twice (often
     with one copy left empty).
     """
-    missing = [c for c in SESSION_KEY_COLUMNS if c not in df.columns]
+    required = ("_source_rank", "attended", *MEMBER_SESSION_KEY_COLUMNS)
+    missing = [c for c in required if c not in df.columns]
     if missing:
-        raise KeyError(
-            f"Cannot deduplicate without session key column(s): {', '.join(missing)}"
-        )
+        raise KeyError(f"Cannot deduplicate without column(s): {', '.join(missing)}")
 
     today = date.today()
 
     df = df.sort_values(["_source_rank", "attended"], ascending=[True, False])
-    df = df.drop_duplicates(subset=list(SESSION_KEY_COLUMNS), keep="first")
+    df = df.drop_duplicates(subset=list(MEMBER_SESSION_KEY_COLUMNS), keep="first")
     df = df.drop(columns=["_source_rank"])
 
     # Filter out future sessions
@@ -185,7 +193,7 @@ def generate_outputs(df: pd.DataFrame, output_dir: Path) -> tuple[Path, Path]:
 
     # Session summary
     session_attendance = (
-        df.groupby(["session_name", "session_date", "session_day_of_week"])["attended"]
+        df.groupby(list(SUMMARY_GROUP_COLUMNS))["attended"]
         .sum()
         .reset_index()
         .sort_values(["session_date", "session_name"])

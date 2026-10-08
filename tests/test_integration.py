@@ -11,7 +11,7 @@ import pytest
 
 from spond_attendance import io, transform
 from spond_attendance.cli import main
-from spond_attendance.transform import SESSION_KEY_COLUMNS
+from spond_attendance.transform import MEMBER_SESSION_KEY_COLUMNS
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
@@ -411,7 +411,7 @@ class TestIncrementalNameMapping:
         main([str(input_dir), "-o", str(output_dir), "--no-llm"])
 
         detail = pd.read_csv(output_dir / "spond.csv", sep="|")
-        duplicates = detail[detail.duplicated(subset=list(SESSION_KEY_COLUMNS))]
+        duplicates = detail[detail.duplicated(subset=list(MEMBER_SESSION_KEY_COLUMNS))]
         assert duplicates.empty, (
             f"{len(duplicates)} duplicated member/session rows after merge"
         )

@@ -26,7 +26,7 @@ Maps raw Spond session names to canonical names. `__SKIP__` means ignore.
 
 ## Data range
 
-Monthly exports from July 2023 to January 2026 (and growing).
+Monthly exports in `data/` cover February 2024 to October 2026 (and growing). Each export is cumulative, so sessions back to July 2023 appear in the output.
 
 ## Previous committee emails
 
