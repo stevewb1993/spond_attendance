@@ -424,7 +424,7 @@ class TestDeduplicate:
         assert len(result) == 1
         assert result.iloc[0]["attended"] == 1
 
-    def test_older_source_still_wins_over_a_later_attendance(self):
+    def test_later_attendance_wins_over_an_older_blank(self):
         df = pd.DataFrame(
             [
                 {
@@ -450,7 +450,36 @@ class TestDeduplicate:
         result = deduplicate(df)
 
         assert len(result) == 1
-        assert result.iloc[0]["attended"] == 0
+        assert result.iloc[0]["attended"] == 1
+
+    def test_member_absent_from_the_newer_source_is_kept(self):
+        """Members who leave the club disappear from newer exports."""
+        df = pd.DataFrame(
+            [
+                {
+                    "name": "Departed",
+                    "session_name": "Club Run",
+                    "session_date": date(2024, 1, 10),
+                    "session_time": "18:45",
+                    "session_day_of_week": "Wednesday",
+                    "attended": 1,
+                    "_source_rank": 0,
+                },
+                {
+                    "name": "Current",
+                    "session_name": "Club Run",
+                    "session_date": date(2024, 1, 10),
+                    "session_time": "18:45",
+                    "session_day_of_week": "Wednesday",
+                    "attended": 1,
+                    "_source_rank": 1,
+                },
+            ]
+        )
+        result = deduplicate(df)
+
+        assert set(result["name"]) == {"Departed", "Current"}
+        assert result["attended"].sum() == 2
 
     def test_missing_session_time_raises(self):
         df = pd.DataFrame(

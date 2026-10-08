@@ -145,10 +145,11 @@ def load_files(files: list[Path]) -> pd.DataFrame:
 
 
 def merge_with_existing(existing: pd.DataFrame, new: pd.DataFrame) -> pd.DataFrame:
-    """Merge new data with existing output, deduplicating so existing wins.
+    """Merge new data into existing output.
 
-    Existing (older) data takes priority because members who leave the
-    club disappear from newer Spond exports.
+    Existing rows are kept whether or not the new export still reports
+    them, because members who leave the club disappear from newer Spond
+    exports. See deduplicate for how conflicting values are resolved.
     """
     existing["_source_rank"] = 0
     new["_source_rank"] = 1
@@ -157,12 +158,14 @@ def merge_with_existing(existing: pd.DataFrame, new: pd.DataFrame) -> pd.DataFra
 
 
 def deduplicate(df: pd.DataFrame) -> pd.DataFrame:
-    """Deduplicate rows: for each session key, keep the row from the
-    lowest _source_rank (oldest source wins).
+    """Collapse each member/session key to one row, keeping the highest
+    attended value and, where those tie, the oldest source.
 
-    Within one source, a recorded attendance wins, because a key can
-    collide there only when Spond holds the same session twice (often
-    with one copy left empty).
+    Taking the highest value picks up registers completed after an export
+    was taken, and copes with Spond holding one session twice with a copy
+    left empty. It never drops a member: a key that only an older export
+    knows about has nothing to compete with, so members who have since
+    left the club keep their history.
     """
     required = ("_source_rank", "attended", *MEMBER_SESSION_KEY_COLUMNS)
     missing = [c for c in required if c not in df.columns]
@@ -171,7 +174,7 @@ def deduplicate(df: pd.DataFrame) -> pd.DataFrame:
 
     today = date.today()
 
-    df = df.sort_values(["_source_rank", "attended"], ascending=[True, False])
+    df = df.sort_values(["attended", "_source_rank"], ascending=[False, True])
     df = df.drop_duplicates(subset=list(MEMBER_SESSION_KEY_COLUMNS), keep="first")
     df = df.drop(columns=["_source_rank"])
 

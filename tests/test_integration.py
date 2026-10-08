@@ -451,3 +451,71 @@ class TestDuplicatedSpondSession:
         ]
         assert len(row) == 1
         assert int(row.iloc[0]["attended"]) == 10
+
+
+@data_dir_exists
+class TestDepartedMembersSurvive:
+    """Members who leave the club must keep their history.
+
+    They disappear from newer Spond exports, so an incremental run has to
+    carry their rows forward from the output it already wrote.
+    """
+
+    @staticmethod
+    def _run(input_dir: Path, output_dir: Path, *names: str) -> pd.DataFrame:
+        for name in names:
+            shutil.copy(DATA_DIR / name, input_dir / name)
+        main([str(input_dir), "-o", str(output_dir), "--no-llm"])
+        return pd.read_csv(output_dir / "spond.csv", sep="|")
+
+    def test_history_survives_a_later_export(self, tmp_path: Path):
+        input_dir = tmp_path / "input"
+        input_dir.mkdir()
+        output_dir = tmp_path / "output"
+
+        before = self._run(input_dir, output_dir, "spond_attendance_2024-03.xlsx")
+        after = self._run(input_dir, output_dir, "spond_attendance_2026-10.xlsx")
+
+        # The newer export has dropped members the older one knew about.
+        departed = set(before["name"]) - set(
+            transform.transform_file(
+                io.read_attendance_file(input_dir / "spond_attendance_2026-10.xlsx")
+            )["name"]
+        )
+        assert departed, "expected the newer export to have dropped some members"
+        assert departed <= set(after["name"]), "departed members lost from the output"
+
+        # No member loses attendance, and the departed keep every session.
+        totals_before = before.groupby("name")["attended"].sum()
+        totals_after = after.groupby("name")["attended"].sum()
+        regressed = totals_after.lt(totals_before.reindex(totals_after.index)).sum()
+        assert regressed == 0, f"{regressed} member(s) lost attendance"
+
+        rows_before = before[before["name"].isin(departed)]
+        rows_after = after[after["name"].isin(departed)]
+        assert len(rows_after) == len(rows_before)
+        assert rows_after["attended"].sum() == rows_before["attended"].sum()
+
+    def test_a_later_register_counts_and_no_attendance_is_lost(self, tmp_path: Path):
+        """Registers get completed after an export has been taken.
+
+        Between these two exports 39 blanks are filled in and 9 recorded
+        attendances are blanked out again; the highest value wins both ways.
+        """
+        input_dir = tmp_path / "input"
+        input_dir.mkdir()
+        output_dir = tmp_path / "output"
+
+        before = self._run(input_dir, output_dir, "spond_attendance_2024-03.xlsx")
+        after = self._run(input_dir, output_dir, "spond_attendance_2024-04.xlsx")
+
+        key = list(MEMBER_SESSION_KEY_COLUMNS)
+        merged = before.merge(
+            after, on=key, how="inner", suffixes=("_before", "_after")
+        )
+        assert (merged["attended_after"] >= merged["attended_before"]).all(), (
+            "an attendance recorded earlier was dropped"
+        )
+        assert merged["attended_after"].sum() > merged["attended_before"].sum(), (
+            "blanks filled in by the later export were not picked up"
+        )
