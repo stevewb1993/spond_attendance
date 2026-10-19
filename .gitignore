@@ -13,3 +13,4 @@ dist/
 output_data/.spond_state.json
 output_data/spond.csv
 .omc/
+.env

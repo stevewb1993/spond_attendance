@@ -8,10 +8,13 @@ dependencies = [
     "openpyxl>=3.1",
     "streamlit>=1.30",
     "plotly>=5.0",
+    "python-dotenv>=1.0",
 ]
 
 [project.scripts]
 spond-attendance = "spond_attendance.cli:main"
+spond-fetch = "spond_attendance.fetch:main"
+spond-update = "spond_attendance.update:main"
 
 [dependency-groups]
 dev = ["pytest>=8.0", "ruff>=0.9", "ty>=0.0.17"]

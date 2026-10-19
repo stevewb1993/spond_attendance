@@ -10,9 +10,7 @@ from pathlib import Path
 
 import pandas as pd
 
-FILENAME_PATTERN = re.compile(
-    r"spond_attendance_(\d{4})-(\d{2})\.xlsx$", re.IGNORECASE
-)
+FILENAME_PATTERN = re.compile(r"spond_attendance_(\d{4})-(\d{2})\.xlsx$", re.IGNORECASE)
 
 STATE_FILENAME = ".spond_state.json"
 

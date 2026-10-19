@@ -55,6 +55,41 @@ spond-attendance ./exports -o ./output_data
 spond-attendance ./exports --no-llm --full-refresh
 ```
 
+## Monthly update
+
+```
+spond-update [--months N] [--no-llm]
+```
+
+Downloads this month's export into `data/` (this month plus the 3 before it, or `--months N`), then runs the pipeline over every export to refresh `output_data/`. Run it again later in the same month and it replaces that month's export and rebuilds the output with `--full-refresh`, since the pipeline would otherwise skip a filename it has already processed. `--data-dir` and `-o` change the folders. Sign-in works as described below.
+
+## Downloading exports from Spond
+
+`spond-fetch` downloads the attendance export straight from the Spond API — the same file as the web client's **Export attendance history** button — so there is no need to pick events by hand or record requests in the browser's network tab.
+
+```
+spond-fetch [output_dir] [--months N | --since YYYY-MM-DD] [--until YYYY-MM-DD] [--force] [--dry-run]
+```
+
+| Argument | Description |
+|---|---|
+| `output_dir` | Where to save the export (defaults to `data/`) |
+| `--months` | Whole months to include before this one (default 3, so a run on 19 October covers 1 July to 19 October) |
+| `--since` | First event date, instead of `--months` |
+| `--until` | Last event date (defaults to today). The file is named after its month: `spond_attendance_YYYY-MM.xlsx` |
+| `--force` | Replace this month's export if it already exists. Follow up with `spond-attendance --full-refresh`, because the pipeline skips filenames it has already processed |
+| `--dry-run` | List the events that would be exported without downloading |
+| `--group-id` | Spond group (defaults to Bath Amphibians, or `SPOND_GROUP_ID`) |
+
+Sign-in details come from `SPOND_USERNAME` and `SPOND_PASSWORD`, read from the environment or from a `.env` file (gitignored) in the repo root, the same as spond-cancellation:
+
+```
+SPOND_USERNAME=you@example.com
+SPOND_PASSWORD=...
+```
+
+Without them, `spond-fetch` prompts for your email and password, plus a texted code if your account uses two-factor sign-in. The sign-in tokens are cached in `~/.config/spond-attendance/tokens.json`, and later runs refresh them without asking again (the refresh token lasts about 90 days). To use a token copied from the browser instead, set `SPOND_TOKEN`.
+
 ## Dashboard
 
 ```
