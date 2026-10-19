@@ -363,6 +363,41 @@ def write_atomically(path: Path, content: bytes) -> None:
     tmp.replace(path)
 
 
+def download_export(
+    output_path: Path,
+    group_id: str,
+    since: date,
+    until: date,
+    token_file: Path | None = None,
+    dry_run: bool = False,
+) -> bool:
+    """Save the attendance export for past events from since to until.
+
+    Returns whether a file was written: nothing is written when there are no
+    events, or on a dry run, which lists the events instead. Raises SpondError
+    if signing in or a request fails.
+    """
+    client = SpondClient()
+    authenticate(client, token_file or default_token_path(), datetime.now(UTC))
+    events = find_events(client, group_id, since, until)
+    if not events:
+        print(f"No past events found from {since} to {until}.")
+        return False
+    print(
+        f"Found {len(events)} events from {events[0].start:%Y-%m-%d} "
+        f"to {events[-1].start:%Y-%m-%d}."
+    )
+    if dry_run:
+        for event in events:
+            print(f"  {event.start:%Y-%m-%d %H:%M} UTC  {event.name}")
+        return False
+    content = client.export_attendance(group_id, [e.spond_id for e in events])
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    write_atomically(output_path, content)
+    print(f"Saved {output_path} ({len(content) // 1024} KB)")
+    return True
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="spond-fetch",
@@ -441,26 +476,15 @@ def main(argv: list[str] | None = None) -> None:
         )
         sys.exit(1)
 
-    client = SpondClient()
     try:
-        authenticate(client, args.token_file or default_token_path(), datetime.now(UTC))
-        events = find_events(client, args.group_id, since, until)
-        if not events:
-            print(f"No past events found from {since} to {until}.")
-            return
-        print(
-            f"Found {len(events)} events from {events[0].start:%Y-%m-%d} "
-            f"to {events[-1].start:%Y-%m-%d}."
+        download_export(
+            output_path,
+            args.group_id,
+            since,
+            until,
+            token_file=args.token_file,
+            dry_run=args.dry_run,
         )
-        if args.dry_run:
-            for event in events:
-                print(f"  {event.start:%Y-%m-%d %H:%M} UTC  {event.name}")
-            return
-        content = client.export_attendance(args.group_id, [e.spond_id for e in events])
     except SpondError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    write_atomically(output_path, content)
-    print(f"Saved {output_path} ({len(content) // 1024} KB)")

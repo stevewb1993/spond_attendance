@@ -36,6 +36,7 @@ See `emails/` for previously sent attendance update emails. Use these for tone a
 
 - `uv run pytest` — run tests
 - `uv run ruff check` — lint
+- `spond-update` — monthly update: download this month's export, then run the pipeline (full refresh when it replaces an export)
 - `spond-fetch` — download this month's export (this month plus the 3 before it) from the Spond API into `data/`
 - `spond-attendance ./data -o ./output_data` — run the pipeline
 - `streamlit run dashboard/app.py` — launch dashboard
