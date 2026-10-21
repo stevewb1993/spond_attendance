@@ -102,7 +102,7 @@ Email goes through the [Brevo](https://www.brevo.com) HTTPS API, using the sende
 
 ### Monthly schedule
 
-`.github/workflows/monthly-email.yml` runs on GitHub Actions at 07:00 UTC on the 2nd of each month. It runs `spond-update --no-llm`, commits the refreshed `data/` and `output_data/` to master, then runs `spond-email` for the month just ended. It needs these repository secrets: `SPOND_USERNAME`, `SPOND_PASSWORD` and `BREVO_API_KEY`. Spond sign-in must not need a texted code, because there is nobody to type it in. Run it by hand from the Actions tab, with **to** set to your own address for a test, or with **dry run** ticked to attach the email to the run instead of sending it.
+`.github/workflows/monthly-email.yml` runs on GitHub Actions at 07:00 UTC on the 3rd of each month. It runs `spond-update --no-llm`, commits the refreshed `data/` and `output_data/` to master, then runs `spond-email` for the month just ended. It needs these repository secrets: `SPOND_USERNAME`, `SPOND_PASSWORD` and `BREVO_API_KEY`. Spond sign-in must not need a texted code, because there is nobody to type it in. Run it by hand from the Actions tab, with **to** set to your own address for a test, or with **dry run** ticked to attach the email to the run instead of sending it.
 
 ## Dashboard
 
