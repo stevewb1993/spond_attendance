@@ -55,6 +55,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Skip Claude suggestions for unmapped session names",
     )
     parser.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help="Accept Claude's suggestions without asking, for unattended runs",
+    )
+    parser.add_argument(
         "--group-id",
         default=os.environ.get("SPOND_GROUP_ID", DEFAULT_GROUP_ID),
         help="Spond group ID (default: Bath Amphibians)",
@@ -89,5 +95,7 @@ def main(argv: list[str] | None = None) -> None:
         pipeline_args.append("--full-refresh")
     if args.no_llm:
         pipeline_args.append("--no-llm")
+    if args.yes:
+        pipeline_args.append("--yes")
     print("\nProcessing exports...")
     cli.main(pipeline_args)

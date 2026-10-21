@@ -1,0 +1,61 @@
+name: Send email after session names are confirmed
+
+# Runs when a "Confirm new session names" pull request from the monthly job is
+# merged: rebuilds the attendance data with the confirmed names (including any
+# edits made on the pull request), then emails the committee that month's
+# update if the pull request is labelled send-email.
+on:
+  pull_request:
+    types: [closed]
+    branches: [master]
+
+permissions:
+  contents: write
+
+concurrency: monthly-email
+
+jobs:
+  send:
+    if: github.event.pull_request.merged && startsWith(github.event.pull_request.head.ref, 'data-update/')
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+
+      - uses: astral-sh/setup-uv@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Rebuild the attendance data
+        run: uv run spond-attendance data -o output_data --full-refresh --no-llm
+
+      - name: Commit the rebuilt data
+        run: |
+          git add output_data
+          if git diff --cached --quiet; then
+            echo "Data already matches the confirmed names."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Rebuild attendance data with the confirmed session names"
+          git push
+
+      - name: Email the committee
+        if: contains(github.event.pull_request.labels.*.name, 'send-email')
+        env:
+          BREVO_API_KEY: ${{ secrets.BREVO_API_KEY }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: uv run spond-email --month "${BRANCH#data-update/}"
+
+      - name: Delete the pull request branch
+        env:
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: git push origin --delete "$BRANCH" || true
