@@ -36,6 +36,7 @@ See `emails/` for previously sent attendance update emails. Use these for tone a
 
 - `uv run pytest` — run tests
 - `uv run ruff check` — lint
+- `spond-email` — email last month's YoY Summary table (the dashboard's) to the committee via Brevo; `--dry-run` to preview. GitHub Actions runs `spond-update` then this on the 2nd of each month (`.github/workflows/monthly-email.yml`)
 - `spond-update` — monthly update: download this month's export, then run the pipeline (full refresh when it replaces an export)
 - `spond-fetch` — download this month's export (this month plus the 3 before it) from the Spond API into `data/`
 - `spond-attendance ./data -o ./output_data` — run the pipeline

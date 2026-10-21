@@ -90,6 +90,20 @@ SPOND_PASSWORD=...
 
 Without them, `spond-fetch` prompts for your email and password, plus a texted code if your account uses two-factor sign-in. The sign-in tokens are cached in `~/.config/spond-attendance/tokens.json`, and later runs refresh them without asking again (the refresh token lasts about 90 days). To use a token copied from the browser instead, set `SPOND_TOKEN`.
 
+## Committee email
+
+```
+spond-email [--month YYYY-MM] [--months N] [--to ADDRESS] [--dry-run]
+```
+
+Emails the dashboard's YoY Summary table (its default sessions, the same table its **Copy table for email** button copies) to amphibs-committee@googlegroups.com from bathamphibiansbookings@gmail.com. The table covers the 6 months (`--months`) ending with last month (`--month`), each against the same month a year earlier. It refuses to send if that month has no attendance, which means the data was not refreshed. `--to` sends to someone else instead, and `--dry-run` writes the email to `email_preview.html` without sending it.
+
+Email goes through the [Brevo](https://www.brevo.com) HTTPS API, using the sender address and API key spond-cancellation already uses. Set `BREVO_API_KEY` in the environment or `.env`. `EMAIL_FROM`, `EMAIL_FROM_NAME` and `EMAIL_TO` override the sender and recipient.
+
+### Monthly schedule
+
+`.github/workflows/monthly-email.yml` runs on GitHub Actions at 07:00 UTC on the 2nd of each month. It runs `spond-update --no-llm`, commits the refreshed `data/` and `output_data/` to master, then runs `spond-email` for the month just ended. It needs these repository secrets: `SPOND_USERNAME`, `SPOND_PASSWORD` and `BREVO_API_KEY`. Spond sign-in must not need a texted code, because there is nobody to type it in. Run it by hand from the Actions tab, with **to** set to your own address for a test, or with **dry run** ticked to attach the email to the run instead of sending it.
+
 ## Dashboard
 
 ```
