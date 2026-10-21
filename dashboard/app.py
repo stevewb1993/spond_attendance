@@ -1,8 +1,22 @@
+import sys
+
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 
 from pathlib import Path
+
+# Streamlit Cloud runs this script without installing the package, so find it
+# in the repo's src/ directory.
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+from spond_attendance.summary import (  # noqa: E402
+    DEFAULT_MONTHS,
+    DEFAULT_SESSIONS,
+    load_attendance,
+    yoy_summary,
+)
+from spond_attendance.summary import html_table as html_table_for  # noqa: E402
 
 DATA_DIR = Path(__file__).parent.parent / "output_data"
 
@@ -12,18 +26,7 @@ st.title("Bath Amphibians Attendance Dashboard")
 
 @st.cache_data
 def load_data() -> pd.DataFrame:
-    attendance = pd.read_csv(DATA_DIR / "session_attendance.csv", sep="|")
-    types = pd.read_csv(DATA_DIR / "session_types.csv")
-
-    df = attendance.merge(types, on="session_name", how="left")
-    df["category"] = df["category"].fillna("Other")
-
-    df["session_date"] = pd.to_datetime(df["session_date"])
-    df["year"] = df["session_date"].dt.year
-    df["month"] = df["session_date"].dt.month
-    df["month_name"] = df["session_date"].dt.strftime("%b")
-    df["year_month"] = df["session_date"].dt.to_period("M").astype(str)
-    return df
+    return load_attendance(DATA_DIR)
 
 
 df = load_data()
@@ -197,16 +200,8 @@ with tab_yoy_summary:
     yoy_src = filtered.copy()
     yoy_full = df.copy()
 
-    # Session selectors per category with sensible defaults
-    cat_defaults: dict[str, list[str]] = {
-        "Swim": ["STV Swim", "STV swim - technique"],
-        "Bike": ["Indoor Bike"],
-        "Run": ["Club Run Session - Green Members"],
-        "S&C": ["S&C"],
-    }
-
     selected_sessions: list[str] = []
-    for cat, defaults in cat_defaults.items():
+    for cat, defaults in DEFAULT_SESSIONS.items():
         cat_sessions = sorted(
             yoy_src.loc[yoy_src["category"] == cat, "session_name"].unique()
         )
@@ -226,203 +221,28 @@ with tab_yoy_summary:
         st.stop()
 
     # Rolling window: last N months back from the latest data point
-    num_months = st.slider("Months to show", 3, 12, 6, key="yoy_summary_months")
-
-    # Find the latest month boundary in the (filtered) data for selected sessions
-    sel_data = yoy_src[yoy_src["session_name"].isin(selected_sessions)]
-    if sel_data.empty:
-        st.info("No data for the selected sessions in the chosen date range.")
-        st.stop()
-    latest_date = sel_data["session_date"].max()
-    # Build list of (year, month) pairs going back num_months from latest
-    ym_pairs: list[tuple[int, int]] = []
-    y, m = latest_date.year, latest_date.month
-    for _ in range(num_months):
-        ym_pairs.append((y, m))
-        m -= 1
-        if m == 0:
-            m = 12
-            y -= 1
-    ym_pairs.reverse()
-
-    # Also need same months one year earlier for comparison
-    compare_pairs = [(y - 1, m) for y, m in ym_pairs]
-
-    # Current-period rows come from the filtered data (so they honour the sidebar
-    # date range); prior-year comparison rows come from the full data (so the
-    # deltas survive even when the range excludes the previous year).
-    cur = sel_data.copy()
-    cur["ym"] = list(zip(cur["year"], cur["month"]))
-    cur = cur[cur["ym"].isin(set(ym_pairs))].drop(columns="ym")
-
-    prior = yoy_full[yoy_full["session_name"].isin(selected_sessions)].copy()
-    prior["ym"] = list(zip(prior["year"], prior["month"]))
-    prior = prior[prior["ym"].isin(set(compare_pairs))].drop(columns="ym")
-
-    src = pd.concat([cur, prior], ignore_index=True)
-
-    # Compute monthly averages per session / day-of-week / year / month
-    summary = (
-        src.groupby(["year", "month", "session_name", "session_day_of_week"])[
-            "attended"
-        ]
-        .mean()
-        .reset_index()
-        .rename(columns={"attended": "avg"})
-    )
-    summary["avg"] = summary["avg"].round(1)
-    summary["label"] = (
-        summary["session_name"] + " (" + summary["session_day_of_week"].str[:3] + ")"
+    num_months = st.slider(
+        "Months to show", 3, 12, DEFAULT_MONTHS, key="yoy_summary_months"
     )
 
-    if summary.empty:
+    yoy_table = yoy_summary(yoy_src, yoy_full, selected_sessions, num_months)
+    if yoy_table is None:
         st.info("No data for the selected sessions and time range.")
         st.stop()
-
-    # Map each label back to its category for ordering
-    label_cat = (
-        summary.drop_duplicates("label")
-        .set_index("label")["session_name"]
-        .map(
-            yoy_full.drop_duplicates("session_name").set_index("session_name")[
-                "category"
-            ]
-        )
-    )
-
-    # Only keep session/day combos that exist in the current period
-    # (excludes defunct sessions like Tuesday S&C that no longer run)
-    active_labels = set(
-        summary[summary[["year", "month"]].apply(tuple, axis=1).isin(ym_pairs)]["label"]
-    )
-    if not active_labels:
-        st.info("No sessions found with data in the current period.")
-        st.stop()
-    summary = summary[summary["label"].isin(active_labels)]
-
-    # Column headers: "Mon YYYY" for each month in the window
-    col_headers = [f"{month_labels[m][:3]} {y}" for y, m in ym_pairs]
-
-    # Pivot helper
-    def _get_val(label: str, y: int, m: int) -> float | None:
-        row = summary[
-            (summary["label"] == label)
-            & (summary["year"] == y)
-            & (summary["month"] == m)
-        ]
-        if row.empty:
-            return None
-        return row["avg"].iloc[0]
-
-    # Order labels: Swim → Bike → Run → S&C, then by day of week within each
-    cat_order = {"Swim": 0, "Bike": 1, "Run": 2, "S&C": 3}
-    day_order = {"Mon": 0, "Tue": 1, "Wed": 2, "Thu": 3, "Fri": 4, "Sat": 5, "Sun": 6}
-
-    def _sort_key(lbl: str) -> tuple[int, str, int]:
-        cat_idx = cat_order.get(label_cat.get(lbl, "Other"), 9)
-        # Extract the 3-letter day abbreviation from "Session Name (Day)"
-        day_abbr = lbl.rsplit("(", 1)[-1].rstrip(")")
-        day_idx = day_order.get(day_abbr, 9)
-        # Group by session name (everything before the day), then by day
-        session_name = lbl.rsplit("(", 1)[0].strip()
-        return (cat_idx, session_name, day_idx)
-
-    ordered_labels = sorted(active_labels, key=_sort_key)
-
-    # Build rows with category header rows inserted
-    row_labels: list[str] = []
-    row_data: dict[str, list[str]] = {col: [] for col in col_headers}
-    prev_cat: str | None = None
-    for label in ordered_labels:
-        cat = label_cat.get(label, "Other")
-        if cat != prev_cat:
-            # Insert a category header row (bold via markdown-ish caps)
-            header = f"── {cat} ──"
-            row_labels.append(header)
-            for col in col_headers:
-                row_data[col].append("")
-            prev_cat = cat
-        row_labels.append(label)
-        for (cy, cm), (py, pm), col in zip(ym_pairs, compare_pairs, col_headers):
-            c = _get_val(label, cy, cm)
-            p = _get_val(label, py, pm)
-            if c is not None and p is not None:
-                diff = c - p
-                sign = "+" if diff > 0 else ""
-                row_data[col].append(f"{c:.1f}  ({sign}{diff:.1f})")
-            elif c is not None:
-                row_data[col].append(f"{c:.1f}")
-            else:
-                row_data[col].append("—")
-
-    display_df = pd.DataFrame({"Session": row_labels, **row_data}).set_index("Session")
+    assert yoy_table is not None  # st.stop() ends the script run
+    row_labels = yoy_table.row_labels
 
     st.caption(
         f"Average attendance for the last {num_months} months. "
         f"Parentheses show change vs same month one year earlier."
     )
     st.dataframe(
-        display_df, use_container_width=True, height=min(600, 50 + 35 * len(row_labels))
+        yoy_table.to_frame(),
+        use_container_width=True,
+        height=min(600, 50 + 35 * len(row_labels)),
     )
 
-    # Build an HTML table for pasting into emails
-    def _build_html_table() -> str:
-        green = "#2e7d32"
-        red = "#c62828"
-        grey = "#9e9e9e"
-        html = (
-            '<table style="border-collapse:collapse;font-family:Arial,sans-serif;'
-            'font-size:13px">'
-        )
-        # Header row
-        html += "<tr>"
-        html += '<th style="text-align:left;padding:4px 10px;border-bottom:2px solid #333">Session</th>'
-        for col in col_headers:
-            html += (
-                f'<th style="text-align:center;padding:4px 10px;'
-                f'border-bottom:2px solid #333">{col}</th>'
-            )
-        html += "</tr>"
-        # Data rows
-        for i, label in enumerate(row_labels):
-            is_header = label.startswith("──")
-            if is_header:
-                html += "<tr>"
-                html += (
-                    f'<td colspan="{len(col_headers) + 1}" style="padding:8px 4px 2px;'
-                    f'font-weight:bold;font-size:14px;border-bottom:1px solid #ccc">'
-                    f"{label}</td>"
-                )
-                html += "</tr>"
-                continue
-            html += "<tr>"
-            html += f'<td style="padding:3px 10px">{label}</td>'
-            for col in col_headers:
-                val = row_data[col][i]
-                # Colour the delta part
-                cell_style = "text-align:center;padding:3px 10px"
-                if "(" in val:
-                    main, delta = val.split("(", 1)
-                    delta = delta.rstrip(")")
-                    if delta.strip().startswith("+"):
-                        colour = green
-                    elif delta.strip().startswith("-"):
-                        colour = red
-                    else:
-                        colour = grey
-                    cell_html = (
-                        f"{main.strip()} "
-                        f'<span style="color:{colour};font-size:11px">'
-                        f"({delta})</span>"
-                    )
-                else:
-                    cell_html = val
-                html += f'<td style="{cell_style}">{cell_html}</td>'
-            html += "</tr>"
-        html += "</table>"
-        return html
-
-    html_table = _build_html_table()
+    html_table = html_table_for(yoy_table)
 
     # Use a JS-powered copy button via streamlit components.
     # We render the HTML in a hidden div and use execCommand('copy') on the

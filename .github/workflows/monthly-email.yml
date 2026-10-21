@@ -1,0 +1,73 @@
+name: Monthly committee email
+
+# Early on the 3rd of each month: download the latest Spond export, commit the
+# refreshed data, then email last month's attendance table to the committee.
+on:
+  schedule:
+    - cron: "0 7 3 * *"
+  workflow_dispatch:
+    inputs:
+      to:
+        description: Send to this address instead of the committee (for a test)
+        required: false
+      dry_run:
+        description: Build the email without sending it (attached to the run)
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency: monthly-email
+
+jobs:
+  email:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Download and process this month's export
+        env:
+          SPOND_USERNAME: ${{ secrets.SPOND_USERNAME }}
+          SPOND_PASSWORD: ${{ secrets.SPOND_PASSWORD }}
+        run: uv run spond-update --no-llm
+
+      - name: Commit the refreshed data
+        run: |
+          git add data output_data
+          if git diff --cached --quiet; then
+            echo "No data changes to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Update attendance data for $(date '+%B %Y')"
+          git push
+
+      - name: Email the committee
+        env:
+          BREVO_API_KEY: ${{ secrets.BREVO_API_KEY }}
+          TO: ${{ inputs.to }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          args=()
+          if [ -n "$TO" ]; then args+=(--to "$TO"); fi
+          if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
+          uv run spond-email "${args[@]}"
+
+      - name: Attach the email preview
+        if: inputs.dry_run
+        uses: actions/upload-artifact@v4
+        with:
+          name: email-preview
+          path: email_preview.html

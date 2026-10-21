@@ -15,6 +15,7 @@ dependencies = [
 spond-attendance = "spond_attendance.cli:main"
 spond-fetch = "spond_attendance.fetch:main"
 spond-update = "spond_attendance.update:main"
+spond-email = "spond_attendance.committee_email:main"
 
 [dependency-groups]
 dev = ["pytest>=8.0", "ruff>=0.9", "ty>=0.0.17"]
