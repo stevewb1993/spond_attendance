@@ -11,6 +11,9 @@ import pandas as pd
 
 SKIP_SENTINEL = "__SKIP__"
 
+# Mapping and categorising names is simple, so the cheapest model will do.
+CLAUDE_MODEL = "haiku"
+
 
 def load_name_mappings(path: Path) -> dict[str, str]:
     """Load session_name_mappings.csv into a raw→parsed dict.
@@ -91,7 +94,7 @@ Respond with ONLY a JSON object mapping each raw name to its suggested canonical
 Example: {{"STV Swim!": "STV Swim", "New Session Type": "New Session Type"}}"""
 
     result = subprocess.run(
-        ["claude", "-p", prompt, "--output-format", "text"],
+        ["claude", "-p", prompt, "--model", CLAUDE_MODEL, "--output-format", "text"],
         capture_output=True,
         text=True,
         timeout=60,
@@ -222,7 +225,7 @@ Respond with ONLY a JSON object mapping each session name to its category. No ot
 Example: {{"STV Swim": "Swim", "Christmas Party": "Other"}}"""
 
     result = subprocess.run(
-        ["claude", "-p", prompt, "--output-format", "text"],
+        ["claude", "-p", prompt, "--model", CLAUDE_MODEL, "--output-format", "text"],
         capture_output=True,
         text=True,
         timeout=60,

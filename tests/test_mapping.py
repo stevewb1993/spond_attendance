@@ -197,6 +197,7 @@ class TestSuggestMappings:
         cmd = call_args.args[0]
         assert cmd[0] == "claude"
         assert "-p" in cmd
+        assert cmd[cmd.index("--model") + 1] == "haiku"
         # The prompt should mention the canonical names
         prompt_text = cmd[cmd.index("-p") + 1]
         assert "STV Swim" in prompt_text
@@ -239,6 +240,7 @@ class TestSuggestCategories:
         call_args = mock_run.call_args
         cmd = call_args.args[0]
         assert cmd[0] == "claude"
+        assert cmd[cmd.index("--model") + 1] == "haiku"
         prompt_text = cmd[cmd.index("-p") + 1]
         assert "Swim" in prompt_text
         assert "Bike" in prompt_text
