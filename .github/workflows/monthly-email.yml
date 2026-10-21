@@ -109,20 +109,25 @@ jobs:
         run: |
           month_name=$(date -d "$MONTH-01" '+%B %Y')
           branch="data-update/$MONTH"
+          # Rows added to a CSV. Saving re-sorts the file, so a diff would also
+          # show rows that only moved.
+          new_rows() { comm -13 <(git show "HEAD:$1" | LC_ALL=C sort) <(LC_ALL=C sort "$1"); }
+          mappings=$(new_rows output_data/session_name_mappings.csv)
+          categories=$(new_rows output_data/session_types.csv)
           {
             echo "The $month_name attendance email is waiting on these new session names."
             echo "Claude suggested how to file them. Edit the CSVs on this branch if any are wrong, then merge."
             echo
-            if ! git diff --quiet -- output_data/session_name_mappings.csv; then
+            if [ -n "$mappings" ]; then
               echo "**New name mappings** (\`session_name_mappings.csv\`: raw Spond name, session it counts as):"
               echo '```'
-              git diff --unified=0 -- output_data/session_name_mappings.csv | grep '^+[^+]' | cut -c2-
+              echo "$mappings"
               echo '```'
             fi
-            if ! git diff --quiet -- output_data/session_types.csv; then
+            if [ -n "$categories" ]; then
               echo "**New categories** (\`session_types.csv\`: session, category):"
               echo '```'
-              git diff --unified=0 -- output_data/session_types.csv | grep '^+[^+]' | cut -c2-
+              echo "$categories"
               echo '```'
             fi
             echo
