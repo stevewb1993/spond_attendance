@@ -218,6 +218,38 @@ class TestFullPipeline:
         assert (output_dir / "spond.csv").exists()
         assert (output_dir / "session_attendance.csv").exists()
 
+    def test_yes_accepts_suggestions_without_asking(
+        self, two_files: Path, tmp_path: Path, monkeypatch
+    ):
+        from spond_attendance import cli, mapping
+
+        def no_input(prompt=""):
+            raise AssertionError("--yes should not ask for input")
+
+        # Claude maps each name to itself, plus a name not in the data
+        monkeypatch.setattr(
+            cli,
+            "suggest_mappings",
+            lambda names, canonical: {n: n for n in names} | {"Not in data": "X"},
+        )
+        monkeypatch.setattr(
+            cli,
+            "suggest_categories",
+            lambda names, types: dict.fromkeys(names, "Other"),
+        )
+        monkeypatch.setattr("builtins.input", no_input)
+        output_dir = tmp_path / "output"
+        main([str(two_files), "-o", str(output_dir), "--yes"])
+
+        mappings = mapping.load_name_mappings(output_dir / "session_name_mappings.csv")
+        types = mapping.load_session_types(output_dir / "session_types.csv")
+        sessions = set(
+            pd.read_csv(output_dir / "session_attendance.csv", sep="|")["session_name"]
+        )
+        assert set(mappings) == sessions
+        assert set(types) == sessions
+        assert set(types.values()) == {"Other"}
+
     def test_state_file_created(self, two_files: Path, tmp_path: Path):
         output_dir = tmp_path / "output"
         main([str(two_files), "-o", str(output_dir), "--no-llm"])

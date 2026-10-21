@@ -1,7 +1,10 @@
 name: Monthly committee email
 
-# Early on the 3rd of each month: download the latest Spond export, commit the
-# refreshed data, then email last month's attendance table to the committee.
+# Early on the 3rd of each month: download the latest Spond export and email
+# last month's attendance table to the committee. Claude suggests mappings and
+# categories for session names it has not seen before; when there are any, the
+# data goes to a pull request for review instead, and merging it sends the
+# email (see confirm-session-names.yml).
 on:
   schedule:
     - cron: "0 7 3 * *"
@@ -17,6 +20,8 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
+  issues: write
 
 concurrency: monthly-email
 
@@ -34,15 +39,34 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: uv sync
+        run: |
+          uv sync
+          npm install -g @anthropic-ai/claude-code
 
       - name: Download and process this month's export
         env:
           SPOND_USERNAME: ${{ secrets.SPOND_USERNAME }}
           SPOND_PASSWORD: ${{ secrets.SPOND_PASSWORD }}
-        run: uv run spond-update --no-llm
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        # Claude signs in with whichever of the two secrets is set.
+        run: |
+          [ -n "$ANTHROPIC_API_KEY" ] || unset ANTHROPIC_API_KEY
+          [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ] || unset CLAUDE_CODE_OAUTH_TOKEN
+          uv run spond-update --yes
+
+      - name: Check for new session names
+        id: names
+        run: |
+          echo "month=$(date -d "$(date +%Y-%m-01) -1 day" +%Y-%m)" >> "$GITHUB_OUTPUT"
+          if git diff --quiet -- output_data/session_name_mappings.csv output_data/session_types.csv; then
+            echo "new=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "new=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Commit the refreshed data
+        if: steps.names.outputs.new == 'false'
         run: |
           git add data output_data
           if git diff --cached --quiet; then
@@ -55,19 +79,76 @@ jobs:
           git push
 
       - name: Email the committee
+        if: steps.names.outputs.new == 'false'
         env:
           BREVO_API_KEY: ${{ secrets.BREVO_API_KEY }}
+          MONTH: ${{ steps.names.outputs.month }}
           TO: ${{ inputs.to }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
-          args=()
+          args=(--month "$MONTH")
           if [ -n "$TO" ]; then args+=(--to "$TO"); fi
           if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
           uv run spond-email "${args[@]}"
 
       - name: Attach the email preview
-        if: inputs.dry_run
+        if: steps.names.outputs.new == 'false' && inputs.dry_run
         uses: actions/upload-artifact@v4
         with:
           name: email-preview
           path: email_preview.html
+
+      - name: Open a pull request to confirm the new session names
+        if: steps.names.outputs.new == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MONTH: ${{ steps.names.outputs.month }}
+          OWNER: ${{ github.repository_owner }}
+          # Test runs open the pull request too, but merging it sends nothing.
+          SEND_ON_MERGE: ${{ !inputs.dry_run && !inputs.to }}
+        run: |
+          month_name=$(date -d "$MONTH-01" '+%B %Y')
+          branch="data-update/$MONTH"
+          {
+            echo "The $month_name attendance email is waiting on these new session names."
+            echo "Claude suggested how to file them. Edit the CSVs on this branch if any are wrong, then merge."
+            echo
+            if ! git diff --quiet -- output_data/session_name_mappings.csv; then
+              echo "**New name mappings** (\`session_name_mappings.csv\`: raw Spond name, session it counts as):"
+              echo '```'
+              git diff --unified=0 -- output_data/session_name_mappings.csv | grep '^+[^+]' | cut -c2-
+              echo '```'
+            fi
+            if ! git diff --quiet -- output_data/session_types.csv; then
+              echo "**New categories** (\`session_types.csv\`: session, category):"
+              echo '```'
+              git diff --unified=0 -- output_data/session_types.csv | grep '^+[^+]' | cut -c2-
+              echo '```'
+            fi
+            echo
+            if [ "$SEND_ON_MERGE" = "true" ]; then
+              echo "Merging rebuilds the attendance data with these names and emails the committee the $month_name update."
+            else
+              echo "This came from a test run, so merging rebuilds the data but emails no one."
+            fi
+          } > pr_body.md
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add data output_data
+          git commit -m "Update attendance data for $month_name"
+          git push --force -u origin "$branch"
+
+          if [ "$(gh pr view "$branch" --json state -q .state 2>/dev/null)" = "OPEN" ]; then
+            gh pr edit "$branch" --body-file pr_body.md
+          else
+            gh pr create --base master --head "$branch" \
+              --title "Confirm new session names for $month_name" \
+              --body-file pr_body.md --assignee "$OWNER"
+          fi
+          if [ "$SEND_ON_MERGE" = "true" ]; then
+            gh label create send-email --color 0e8a16 \
+              --description "Merging emails the committee" 2>/dev/null || true
+            gh pr edit "$branch" --add-label send-email
+          fi

@@ -59,6 +59,12 @@ def test_replaced_export_triggers_full_refresh(tmp_path, calls):
     assert "--no-llm" in pipeline_args
 
 
+def test_yes_is_passed_to_the_pipeline(tmp_path, calls):
+    run(tmp_path, "--yes")
+    [pipeline_args] = calls["pipeline"]
+    assert "--yes" in pipeline_args
+
+
 def test_months_option(tmp_path, calls):
     run(tmp_path, "--months", "1")
     [(_, since, _)] = calls["download"]

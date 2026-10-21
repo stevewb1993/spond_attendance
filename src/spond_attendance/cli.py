@@ -59,6 +59,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Skip Claude API suggestions for unmapped session names",
     )
+    parser.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help="Accept Claude's suggestions without asking, for unattended runs",
+    )
     return parser.parse_args(argv)
 
 
@@ -72,6 +78,22 @@ def _missing_detail_columns(detail_csv: Path) -> list[str]:
     except (pd.errors.EmptyDataError, pd.errors.ParserError):
         return list(DETAIL_COLUMNS)
     return [c for c in DETAIL_COLUMNS if c not in header.columns]
+
+
+def _approve(
+    suggestions: dict[str, str], wanted: set[str], accept_all: bool
+) -> tuple[dict[str, str], set[str]]:
+    """Approve Claude's suggestions for the wanted names.
+
+    With accept_all every suggestion is taken as it is, otherwise the user is
+    asked about each. Returns (approved, skipped).
+    """
+    suggestions = {k: v for k, v in suggestions.items() if k in wanted}
+    if not accept_all:
+        return prompt_user_approval(suggestions)
+    for raw, suggested in sorted(suggestions.items()):
+        print(f'  "{raw}" → "{suggested}"')
+    return suggestions, set()
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -143,7 +165,7 @@ def main(argv: list[str] | None = None) -> None:
             print("\nAsking Claude for mapping suggestions...")
             suggestions = suggest_mappings(unmapped, canonical_names)
             print()
-            approved, skipped = prompt_user_approval(suggestions)
+            approved, skipped = _approve(suggestions, unmapped, args.yes)
             if approved or skipped:
                 mappings.update(approved)
                 for name in skipped:
@@ -185,7 +207,9 @@ def main(argv: list[str] | None = None) -> None:
             existing_types = load_session_types(types_path)
             cat_suggestions = suggest_categories(uncategorized, existing_types)
             print()
-            approved_cats, _skipped_cats = prompt_user_approval(cat_suggestions)
+            approved_cats, _skipped_cats = _approve(
+                cat_suggestions, uncategorized, args.yes
+            )
             if approved_cats:
                 existing_types.update(approved_cats)
                 save_session_types(types_path, existing_types)
