@@ -4,8 +4,12 @@ name: Send email after session names are confirmed
 # merged: rebuilds the attendance data with the confirmed names (including any
 # edits made on the pull request), then emails the committee that month's
 # update if the pull request is labelled send-email.
+#
+# pull_request_target, because GitHub holds pull_request runs on the bot's pull
+# requests for a maintainer's approval. It is safe here: the job only checks
+# out master, never the pull request's code.
 on:
-  pull_request:
+  pull_request_target:
     types: [closed]
     branches: [master]
 
