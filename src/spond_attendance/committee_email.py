@@ -31,6 +31,9 @@ BREVO_URL = "https://api.brevo.com/v3/smtp/email"
 DEFAULT_FROM = "bathamphibiansbookings@gmail.com"
 DEFAULT_FROM_NAME = "Bath Amphibians"
 DEFAULT_TO = "amphibs-committee@googlegroups.com"
+# Copies of each email, alongside the sender itself (Brevo sends leave no copy
+# in its Sent folder)
+DEFAULT_BCC = "stevewbowser@gmail.com"
 
 
 class EmailError(Exception):
@@ -116,9 +119,10 @@ def send_email(
     subject: str,
     html: str,
     text: str,
+    bcc: list[str] | None = None,
 ) -> None:
     """Send one email through Brevo. Raises EmailError on failure."""
-    payload = {
+    payload: dict[str, object] = {
         "sender": {"email": sender, "name": sender_name},
         "to": [{"email": address} for address in to],
         "replyTo": {"email": sender},
@@ -126,6 +130,8 @@ def send_email(
         "htmlContent": html,
         "textContent": text,
     }
+    if bcc:
+        payload["bcc"] = [{"email": address} for address in bcc]
     request = urllib.request.Request(
         BREVO_URL,
         data=json.dumps(payload).encode(),
@@ -144,6 +150,17 @@ def send_email(
         raise EmailError(f"Brevo rejected the email ({e.code}): {detail}") from e
     except urllib.error.URLError as e:
         raise EmailError(f"Could not reach Brevo: {e.reason}") from e
+
+
+def blind_copies(bcc: list[str], to: list[str]) -> list[str]:
+    """bcc without repeats or addresses already in to, which Brevo rejects."""
+    seen = {address.lower() for address in to}
+    copies = []
+    for address in bcc:
+        if address.lower() not in seen:
+            seen.add(address.lower())
+            copies.append(address)
+    return copies
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -178,6 +195,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=f"Recipient, repeatable (default: EMAIL_TO or {DEFAULT_TO})",
     )
     parser.add_argument(
+        "--bcc",
+        action="append",
+        help=f"Blind copy, repeatable (default: EMAIL_BCC, comma-separated, or "
+        f"{DEFAULT_BCC} and the sender)",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Write the email to --preview instead of sending it",
@@ -196,6 +219,12 @@ def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     month = args.month or previous_month(date.today())
     to = args.to or [os.environ.get("EMAIL_TO") or DEFAULT_TO]
+    sender = os.environ.get("EMAIL_FROM") or DEFAULT_FROM
+    bcc_env = [a.strip() for a in os.environ.get("EMAIL_BCC", "").split(",")]
+    bcc = blind_copies(
+        args.bcc or [a for a in bcc_env if a] or [DEFAULT_BCC, sender], to
+    )
+    recipients = ", ".join(to) + (f" (bcc {', '.join(bcc)})" if bcc else "")
 
     try:
         summary = build_report(args.data_dir, month, args.months)
@@ -206,7 +235,7 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.dry_run:
         args.preview.write_text(html, encoding="utf-8")
-        print(f"Would send {subject(month)!r} to {', '.join(to)}.")
+        print(f"Would send {subject(month)!r} to {recipients}.")
         print(f"Preview written to {args.preview}")
         return
 
@@ -217,14 +246,15 @@ def main(argv: list[str] | None = None) -> None:
     try:
         send_email(
             api_key,
-            os.environ.get("EMAIL_FROM") or DEFAULT_FROM,
+            sender,
             os.environ.get("EMAIL_FROM_NAME") or DEFAULT_FROM_NAME,
             to,
             subject(month),
             html,
             text_body(summary, month),
+            bcc,
         )
     except EmailError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
-    print(f"Sent {subject(month)!r} to {', '.join(to)}.")
+    print(f"Sent {subject(month)!r} to {recipients}.")

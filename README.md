@@ -99,7 +99,7 @@ spond-email [--month YYYY-MM] [--months N] [--to ADDRESS] [--dry-run]
 
 Emails the dashboard's YoY Summary table (its default sessions, the same table its **Copy table for email** button copies) to amphibs-committee@googlegroups.com from bathamphibiansbookings@gmail.com. The table covers the 6 months (`--months`) ending with last month (`--month`), each against the same month a year earlier. It refuses to send if that month has no attendance, which means the data was not refreshed. `--to` sends to someone else instead, and `--dry-run` writes the email to `email_preview.html` without sending it.
 
-Email goes through the [Brevo](https://www.brevo.com) HTTPS API, using the sender address and API key spond-cancellation already uses. Set `BREVO_API_KEY` in the environment or `.env`. `EMAIL_FROM`, `EMAIL_FROM_NAME` and `EMAIL_TO` override the sender and recipient.
+Email goes through the [Brevo](https://www.brevo.com) HTTPS API, using the sender address and API key spond-cancellation already uses. Set `BREVO_API_KEY` in the environment or `.env`. Each email is blind-copied to stevewbowser@gmail.com and to the sender, since Brevo leaves no copy in the sender's Sent folder. `EMAIL_FROM`, `EMAIL_FROM_NAME`, `EMAIL_TO` and `EMAIL_BCC` (comma-separated), or `--bcc`, override the sender and recipients.
 
 ### Monthly schedule
 
