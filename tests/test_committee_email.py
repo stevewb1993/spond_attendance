@@ -51,7 +51,7 @@ def sent(monkeypatch):
 
     monkeypatch.setattr(committee_email, "load_dotenv", lambda *a, **k: None)
     monkeypatch.setattr(committee_email.urllib.request, "urlopen", fake_urlopen)
-    for var in ("EMAIL_TO", "EMAIL_FROM", "EMAIL_FROM_NAME"):
+    for var in ("EMAIL_TO", "EMAIL_FROM", "EMAIL_FROM_NAME", "EMAIL_BCC"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("BREVO_API_KEY", "test-key")
     return requests
@@ -78,6 +78,10 @@ def test_sends_table_ending_with_month(data_dir, sent):
         "name": "Bath Amphibians",
     }
     assert payload["to"] == [{"email": "amphibs-committee@googlegroups.com"}]
+    assert payload["bcc"] == [
+        {"email": "stevewbowser@gmail.com"},
+        {"email": "bathamphibiansbookings@gmail.com"},
+    ]
     assert payload["subject"] == "Attendance update — October 2026"
     html = payload["htmlContent"]
     assert "Sep 2026" in html and "Oct 2026" in html
@@ -92,6 +96,26 @@ def test_to_overrides_recipient(data_dir, sent):
     )
 
     assert json.loads(sent[0].data)["to"] == [{"email": "me@example.com"}]
+
+
+def test_bcc_leaves_out_addresses_already_sent_to(data_dir, sent):
+    committee_email.main(
+        ["-d", str(data_dir), "--month", "2026-10", "--to", "StevewBowser@gmail.com"]
+    )
+
+    assert json.loads(sent[0].data)["bcc"] == [
+        {"email": "bathamphibiansbookings@gmail.com"}
+    ]
+
+
+def test_bcc_from_environment(data_dir, sent, monkeypatch):
+    monkeypatch.setenv("EMAIL_BCC", "a@example.com, b@example.com")
+    committee_email.main(["-d", str(data_dir), "--month", "2026-10"])
+
+    assert json.loads(sent[0].data)["bcc"] == [
+        {"email": "a@example.com"},
+        {"email": "b@example.com"},
+    ]
 
 
 def test_dry_run_writes_preview_without_sending(data_dir, sent, tmp_path):
